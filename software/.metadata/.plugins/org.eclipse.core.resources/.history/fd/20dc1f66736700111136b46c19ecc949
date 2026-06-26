@@ -1,0 +1,83 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+
+#define BASE        ((uintptr_t)RX_0_BASE)
+#define RD(o)       (*((volatile uint32_t *)(BASE + ((o) << 2))))
+#define WR(o,v)     (*((volatile uint32_t *)(BASE + ((o) << 2))) = (v))
+
+/* Địa chỉ thanh ghi */
+#define FIFO            0x000u
+#define REG_PAYLOAD_LEN 0x101u
+#define REG_DATAV       0x108u
+#define REG_CLEAR_DV    0x109u
+#define IS_EMPTY        0x10Au
+
+static int fifo_is_empty(void) {
+    return (int)(RD(IS_EMPTY) & 1);
+}
+
+static uint8_t fifo_read(void) {
+    while (fifo_is_empty());        // chờ có dữ liệu
+    return (uint8_t)RD(FIFO);
+}
+
+int main(void) {
+    printf("=== MAVLink RX ===\n");
+
+    while (1) {
+
+        /* Chỉ xử lý khi dataValid_reg = 1 (frame đã được nhận và CRC đúng) */
+        if (!(RD(REG_DATAV) & 1))
+            continue;
+
+        /* Đọc payload_len từ thanh ghi CF thay vì từ FIFO */
+        uint8_t len = (uint8_t)RD(REG_PAYLOAD_LEN);
+
+        /* Tổng số byte trong FIFO: 1(STX) + 1(len) + 8(header) + len(payload) + 2(CRC) */
+        uint16_t total = 12 + len;
+
+        /* Kiểm tra FIFO có đủ dữ liệu không trước khi đọc */
+        /* (đơn giản: nếu dataValid=1 thì mavlink_rx đã push đủ) */
+
+        /* Đọc toàn bộ frame */
+        uint8_t frame[267];
+        for (int i = 0; i < total; i++)
+            frame[i] = fifo_read();
+
+        /* Clear dataValid_reg */
+        WR(REG_CLEAR_DV, 1);
+
+        /* Parse và in */
+        uint8_t stx     = frame[0];
+        uint8_t plen    = frame[1];
+        uint8_t inc     = frame[2];
+        uint8_t cmp     = frame[3];
+        uint8_t seq     = frame[4];
+        uint8_t sys_id  = frame[5];
+        uint8_t comp_id = frame[6];
+        uint32_t msg_id = frame[7] | ((uint32_t)frame[8] << 8) | ((uint32_t)frame[9] << 16);
+        uint8_t *payload = &frame[10];
+        uint8_t crc_lo  = frame[10 + plen];
+        uint8_t crc_hi  = frame[11 + plen];
+
+        if (stx != 0xFD) {
+            printf("[WARN] STX sai: 0x%02X\n", stx);
+            continue;
+        }
+
+        printf("--- MAVLink Frame ---\n");
+        printf("  len     = %u\n",   plen);
+        printf("  inc     = 0x%02X\n", inc);
+        printf("  cmp     = 0x%02X\n", cmp);
+        printf("  seq     = %u\n",   seq);
+        printf("  sys_id  = %u\n",   sys_id);
+        printf("  comp_id = %u\n",   comp_id);
+        printf("  msg_id  = %u\n",   msg_id);
+        printf("  CRC     = %02X%02X\n", crc_hi, crc_lo);
+        printf("  payload = ");
+        for (int i = 0; i < plen; i++)
+            printf("%02X ", payload[i]);
+        printf("\n");
+    }
+}

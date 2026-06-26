@@ -1,0 +1,103 @@
+/*
+ * "Hello World" example.
+ *
+ * This example prints 'Hello from Nios II' to the STDOUT stream. It runs on
+ * the Nios II 'standard', 'full_featured', 'fast', and 'low_cost' example
+ * designs. It runs with or without the MicroC/OS-II RTOS and requires a STDOUT
+ * device in your system's hardware.
+ * The memory footprint of this hosted application is ~69 kbytes by default
+ * using the standard reference design.
+ *
+ * For a reduced footprint version of this template, and an explanation of how
+ * to reduce the memory footprint for a given application, see the
+ * "small_hello_world" template.
+ *
+ */
+
+#include <stdio.h>
+#define ADDR_FIFO       0x000
+
+#define ADDR_PAYLOAD_LEN      0x100*4
+#define ADDR_INC_FLAGS   0x101*4
+#define ADDR_COM_FLAGS     0x102*4
+#define ADDR_SYSID            0x103*4
+#define ADDR_COMPID           0x104*4
+#define ADDR_MSGID            0x105*4
+#define ADDR_START			  0x106*4
+#define ADDR_FIFO_FULL        0x107*4
+#define ADDR_FIFO_EMPTY       0x108*4
+#define ADDR_BUSY_REG         0x109*4
+
+void write(int  addr, int value){
+	*(int *)(TX_0_BASE + addr) = value;
+}
+bool wait_done(){
+	return (*(int *)(TX_0_BASE + ADDR_BUSY_REG)) & 0x01;
+}
+bool is_full(){
+	return (*(int *)(TX_0_BASE + ADDR_FIFO_FULL)) & 0x01;
+}
+void send_frame(char *payload, int len, int sys_id, int comp_id, int msg_id, int inc_flags, int cmp_flags){
+
+
+		while(wait_done());
+		if(!is_full()){
+
+			write(ADDR_PAYLOAD_LEN, len);
+			write(ADDR_INC_FLAGS, inc_flags);
+			write(ADDR_COM_FLAGS, cmp_flags);
+			write(ADDR_SYSID, sys_id);
+			write(ADDR_COMPID, comp_id);
+			write(ADDR_MSGID, msg_id & 0x00FFFFFF);//24 byte
+
+			int i;
+			for(int i = 0; i < len; i++){
+				write(ADDR_FIFO, payload[i]);
+			}
+			write(ADDR_START, 1);
+			while(wait_done());
+		}
+}
+
+void send_heartbeat(void)
+{
+    char p[9] = {
+        0x00, 0x00, 0x00, 0x00, 0x06,0x08,0xC1,0x04,0x03
+    };
+    send_frame(p, 9, 1, 1, 0, 0x00, 0x00);
+}
+
+void send_statusText(char *payload){
+	char p[51];
+	memset(p,0,sizeof(p));
+	p[0] = 0;// security
+	int len = strlen(payload);
+	memcpy(p + 1, payload, len);
+	send_frame(p, 51, 1, 1, 253, 0x00, 0x00);
+}
+
+void sendText(){
+    char input[255];
+    memset(input, 0, sizeof(input));
+    char c;
+    int i;
+    for(i = 0; i < 254; i++){
+        scanf("%c", &c);
+        if(c == '\n'){
+            break;
+        }else{
+            input[i] = c;
+        }
+    }
+    input[i] = '\0';
+    if(i > 0){
+        send_statusText(input);
+        printf("%s\n", input);
+    }
+}
+int main()
+{
+  printf("Hello from Nios II!\n");
+  printf("abc\n");
+  return 0;
+}

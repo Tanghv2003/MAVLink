@@ -1,0 +1,83 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+
+#define MAV_BASE  TX_0_BASE
+
+static inline void av_write(uint32_t base, uint32_t off, uint32_t val) {
+    *((volatile uint32_t *)(base + off)) = val;
+}
+static inline uint32_t av_read(uint32_t base, uint32_t off) {
+    return *((volatile uint32_t *)(base + off));
+}
+
+static int fifo_write(const uint8_t *data, uint8_t len) {
+    for (int i = 0; i < len; i++) {
+        if (av_read(MAV_BASE, 0x107 * 4) & 0x1) {
+            printf("  [ERR] FIFO full at byte %d\n", i);
+            return -1;
+        }
+        av_write(MAV_BASE, 0x000, data[i]);
+    }
+    return 0;
+}
+
+static int mavlink_v2_send(uint8_t sys,  uint8_t comp,
+                            uint32_t msg_id,
+                            uint8_t incompat, uint8_t compat,
+                            const uint8_t *payload, uint8_t plen) {
+    if (av_read(MAV_BASE, 0x109 * 4) & 0x1) {
+        printf("  [ERR] MAVLink busy!\n");
+        return -1;
+    }
+
+    fifo_write(payload, plen);
+    av_write(MAV_BASE, 0x100 * 4, plen);
+    av_write(MAV_BASE, 0x101 * 4, incompat);
+    av_write(MAV_BASE, 0x102 * 4, compat);
+    av_write(MAV_BASE, 0x103 * 4, sys);
+    av_write(MAV_BASE, 0x104 * 4, comp);
+    av_write(MAV_BASE, 0x105 * 4, msg_id & 0xFFFFFF);
+    av_write(MAV_BASE, 0x106 * 4, 0x1);
+
+    int timeout = 5000000;
+    while (av_read(MAV_BASE, 0x109 * 4) & 0x1) {
+        if (--timeout == 0) {
+            printf("  [ERR] TX timeout!\n");
+            return -1;
+        }
+    }
+    return 0;
+}
+
+int main(void) {
+    printf("\n====================================\n");
+    printf("  MAVLink v2 TX Test (CP2102)\n");
+    printf("====================================\n");
+
+    printf("FIFO empty   = %d (expect 1)\n",
+           (int)(av_read(MAV_BASE, 0x108 * 4) & 1));
+    printf("MAVLink busy = %d (expect 0)\n",
+           (int)(av_read(MAV_BASE, 0x109 * 4) & 1));
+
+    // Gui lien tuc 5 lan, moi lan cach nhau 1 giay
+    uint8_t pl[] = {0x00, 0x00, 0x00, 0x00,
+                    0x06, 0x08, 0x00, 0x04, 0x03};
+
+    for (int i = 0; i < 5; i++) {
+        printf("Sending HEARTBEAT #%d...\n", i + 1);
+        mavlink_v2_send(1, 1, 0x000000,
+                        0x00, 0x00,
+                        pl, sizeof(pl));
+        printf("  Done\n");
+
+        // Delay ~1 giay
+        volatile int d = 50000000;
+        while (d--);
+    }
+
+    printf("====================================\n");
+    printf("  ALL DONE - Check CP2102 terminal\n");
+    printf("====================================\n");
+    return 0;
+}

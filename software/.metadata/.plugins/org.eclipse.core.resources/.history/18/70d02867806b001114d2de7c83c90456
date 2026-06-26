@@ -1,0 +1,289 @@
+/**
+ * mavlink_rx_test.c
+ *
+ * Đọc và decode frame MAVLink từ avalon_slave_rx.v
+ *
+ * Register map (theo avalon_slave_rx.v):
+ *   0x000 - 0x0FF : FIFO data (fifo_sel)
+ *   0x101         : payload_len
+ *   0x102         : finc_flag
+ *   0x103         : fcmp_flag
+ *   0x104         : fsys_id
+ *   0x105         : fcomp_id
+ *   0x106         : fmsg_id (24-bit)
+ *   0x107         : fseq
+ *   0x108         : dataValid_reg  (1=có frame mới, đọc-only)
+ *   0x109         : clear_dataValid (write 1 để clear dataValid_reg)
+ *   0x10A         : isEmpty (FIFO trống = 1)
+ *
+ * QUAN TRỌNG: FIFO có dataValid signal nội bộ với latency.
+ * Đọc xong 1 byte phải kiểm tra isEmpty đã giảm chưa, hoặc
+ * dùng polling loop để đảm bảo dữ liệu ổn định.
+ */
+
+#include <stdio.h>
+#include "system.h"
+#include <stdint.h>
+#include <string.h>
+
+#define RX_BASE  RX_0_BASE
+
+#define RD(base, o)    (*((volatile uint32_t *)((base) + (o)*4)))
+#define WR(base, o, v) (*((volatile uint32_t *)((base) + (o)*4)) = (v))
+
+// ----------------------------------------------------------------
+// Register offsets — khớp đúng avalon_slave_rx.v
+// ----------------------------------------------------------------
+#define REG_FIFO         0x000   // fifo_sel: 0x000-0x0FF
+#define REG_PAYLOAD_LEN  0x101
+#define REG_INC_FLAGS    0x102
+#define REG_CMP_FLAGS    0x103
+#define REG_SYS_ID       0x104
+#define REG_COMP_ID      0x105
+#define REG_MSG_ID       0x106
+#define REG_SEQ          0x107
+#define REG_DATA_VALID   0x108
+#define REG_CLEAR_VALID  0x109
+#define REG_FIFO_EMPTY   0x10A
+
+#define MAVLINK_MAX_PAYLOAD 255
+#define MAVLINK_HEADER_LEN  10   // STX không vào FIFO theo logic state "fifo"
+#define MAVLINK_CRC_LEN     2
+
+// ----------------------------------------------------------------
+// Frame struct
+// ----------------------------------------------------------------
+typedef struct {
+    uint8_t  stx;
+    uint8_t  payload_len;
+    uint8_t  incompat_flags;
+    uint8_t  compat_flags;
+    uint8_t  seq;
+    uint8_t  sysid;
+    uint8_t  compid;
+    uint32_t msgid;
+    uint8_t  payload[MAVLINK_MAX_PAYLOAD];
+    uint16_t checksum;
+} mavlink_frame_t;
+
+// ----------------------------------------------------------------
+// Low-level helpers
+// ----------------------------------------------------------------
+
+static inline int data_valid(void) {
+    return (RD(RX_BASE, REG_DATA_VALID) & 1);
+}
+
+static inline int fifo_empty(void) {
+    return (RD(RX_BASE, REG_FIFO_EMPTY) & 1);
+}
+
+static inline void clear_valid(void) {
+    WR(RX_BASE, REG_CLEAR_VALID, 1);
+}
+
+/**
+ * Đọc 1 byte từ FIFO.
+ *
+ * QUAN TRỌNG: Avalon slave này dùng synchronous FIFO với
+ * dataValid pulse nội bộ — read access có thể cần thêm vài
+ * chu kỳ để dữ liệu ổn định trước khi CPU lấy được giá trị
+ * đúng. Để an toàn, đọc 2 lần liên tiếp và dùng giá trị sau.
+ *
+ * Nếu vẫn sai dữ liệu, cần sửa lại Verilog (xem ghi chú ở cuối file).
+ */
+static inline uint8_t read_fifo_byte(void)
+{
+    // Chờ FIFO có dữ liệu
+    while (fifo_empty());
+
+    // Đọc — vì Avalon MM thường registered-read 1 cycle latency
+    // CPU read access (load instruction) đã tự động đợi đúng
+    // 1 chu kỳ trước khi lấy readdata, nên thường KHÔNG cần thêm
+    // delay thủ công. Tuy nhiên nếu module fifo có thêm latency
+    // (dataValid signal trễ hơn 1 cycle), cần đọc lại để chắc chắn.
+    uint8_t val = (uint8_t)(RD(RX_BASE, REG_FIFO) & 0xFF);
+
+    return val;
+}
+
+// ----------------------------------------------------------------
+// Đọc và parse 1 frame hoàn chỉnh từ FIFO
+// ----------------------------------------------------------------
+void read_frame(mavlink_frame_t *f)
+{
+    // payload_len lấy từ register riêng (đã latch sẵn từ mavlink_rx)
+    uint8_t plen = (uint8_t)(RD(RX_BASE, REG_PAYLOAD_LEN) & 0xFF);
+
+    // Theo logic Verilog: fifo_buf chứa [STX][LEN][INC][CMP][SEQ]
+    //   [SYS][COMP][MSGID0][MSGID1][MSGID2][PAYLOAD...][CRC_LO][CRC_HI]
+    // Tổng = 10 (header có STX) + plen + 2 (CRC)
+    uint16_t total = 1 + MAVLINK_HEADER_LEN - 1 + plen + MAVLINK_CRC_LEN;
+    // = 10 + plen + 2  (giữ nguyên công thức gốc, STX tính trong 10 byte header)
+
+    uint8_t raw[1 + MAVLINK_HEADER_LEN + MAVLINK_MAX_PAYLOAD + MAVLINK_CRC_LEN];
+
+    for (int i = 0; i < total; i++) {
+        raw[i] = read_fifo_byte();
+    }
+
+    // ---- Parse header ----
+    // raw[0] = STX (0xFD) — Verilog push fifo_buf[0]=8'hFD vào FIFO
+    f->stx            = raw[0];
+    f->payload_len    = raw[1];
+    f->incompat_flags = raw[2];
+    f->compat_flags   = raw[3];
+    f->seq            = raw[4];
+    f->sysid          = raw[5];
+    f->compid         = raw[6];
+    f->msgid          = (uint32_t)raw[7]
+                      | ((uint32_t)raw[8] << 8)
+                      | ((uint32_t)raw[9] << 16);
+
+    // ---- Parse payload ----
+    if (plen > 0) {
+        memcpy(f->payload, &raw[10], plen);
+    }
+
+    // ---- Parse CRC ----
+    f->checksum = (uint16_t)raw[10 + plen]
+                | ((uint16_t)raw[11 + plen] << 8);
+
+    // Báo cho hardware đã đọc xong, sẵn sàng nhận frame tiếp
+    clear_valid();
+}
+
+// ----------------------------------------------------------------
+// In thông tin frame
+// ----------------------------------------------------------------
+void print_frame(const mavlink_frame_t *f, int count)
+{
+    printf("=== Frame #%d ===\n", count);
+    printf("  STX     : 0x%02X\n", f->stx);
+    printf("  SEQ     : %d\n",     f->seq);
+    printf("  SYS_ID  : %d\n",     f->sysid);
+    printf("  COMP_ID : %d\n",     f->compid);
+    printf("  MSG_ID  : 0x%06lX\n", (unsigned long)f->msgid);
+    printf("  LEN     : %d\n",     f->payload_len);
+    printf("  CRC     : 0x%04X\n", f->checksum);
+    printf("  Payload :");
+    for (int i = 0; i < f->payload_len; i++) {
+        if (i % 16 == 0) printf("\n    ");
+        printf("%02X ", f->payload[i]);
+    }
+    printf("\n");
+    fflush(stdout);
+}
+
+// ----------------------------------------------------------------
+// Decode theo từng loại message cụ thể (tùy chọn)
+// ----------------------------------------------------------------
+void decode_known_message(const mavlink_frame_t *f)
+{
+    switch (f->msgid) {
+
+    case 0: { // HEARTBEAT
+        if (f->payload_len >= 9) {
+            uint32_t custom_mode = f->payload[0]
+                                  | (f->payload[1] << 8)
+                                  | (f->payload[2] << 16)
+                                  | (f->payload[3] << 24);
+            uint8_t type            = f->payload[4];
+            uint8_t autopilot       = f->payload[5];
+            uint8_t base_mode       = f->payload[6];
+            uint8_t system_status   = f->payload[7];
+            uint8_t mavlink_version = f->payload[8];
+
+            printf("  >> HEARTBEAT: type=%d autopilot=%d "
+                   "base_mode=%d status=%d ver=%d custom_mode=%lu\n",
+                type, autopilot, base_mode, system_status,
+                mavlink_version, (unsigned long)custom_mode);
+        }
+        break;
+    }
+
+    case 253: { // STATUSTEXT
+        if (f->payload_len >= 51) {
+            uint8_t severity = f->payload[0];
+            char text[51];
+            memcpy(text, &f->payload[1], 50);
+            text[50] = '\0';
+            printf("  >> STATUSTEXT [sev=%d]: %s\n", severity, text);
+        }
+        break;
+    }
+
+    default:
+        printf("  >> (unhandled msg_id=%lu)\n", (unsigned long)f->msgid);
+        break;
+    }
+    fflush(stdout);
+}
+
+// ----------------------------------------------------------------
+// Main
+// ----------------------------------------------------------------
+int main(void)
+{
+    printf("=== MAVLink RX Decoder ===\n");
+    fflush(stdout);
+
+    mavlink_frame_t frame;
+    int count = 0;
+
+    while (1) {
+        // Chờ hardware báo có frame mới (CRC đã verify OK trong Verilog)
+        if (!data_valid()) {
+            continue;
+        }
+
+        memset(&frame, 0, sizeof(frame));
+        read_frame(&frame);
+
+        count++;
+        print_frame(&frame, count);
+        decode_known_message(&frame);
+    }
+
+    return 0;
+}
+
+/*
+ * ============================================================
+ * GHI CHÚ QUAN TRỌNG VỀ TIMING FIFO
+ * ============================================================
+ *
+ * Nếu dữ liệu đọc được bị lệch/sai (ví dụ payload toàn 0 hoặc
+ * byte bị trùng/lặp), nguyên nhân là do sync_fifo có dataValid
+ * pulse với latency > 1 cycle so với rd_en, nhưng Avalon slave
+ * (avalon_slave_rx.v) đang chờ fifo_dataValid để set readdataValid:
+ *
+ *   if (fifo_dataValid) begin
+ *       readdata      <= {24'd0, fifo_out};
+ *       readdataValid <= 1'b1;
+ *   end
+ *
+ * Đây là kiểu "variable latency Avalon slave" — CHUẨN thì phải
+ * khai báo port "readdatavalid" ra ngoài để Platform Designer
+ * tự động chèn logic chờ (wait-state) cho CPU. Nếu Avalon
+ * interface trong Platform Designer được cấu hình là
+ * "Fixed read latency = 1" (mặc định khi không có readdatavalid
+ * port), CPU sẽ đọc giá trị readdata tại đúng cycle tiếp theo,
+ * BẤT KỂ fifo_dataValid đã lên hay chưa — dẫn đến đọc sai.
+ *
+ * Cách kiểm tra nhanh: nếu thấy payload sai liên tục theo 1 quy
+ * luật (ví dụ luôn lệch 1 byte, hoặc luôn là giá trị cũ), gần
+ * như chắc chắn là do thiếu readdatavalid port.
+ *
+ * Sửa triệt để (khuyến nghị) — thêm port readdatavalid ra top
+ * module Avalon, và khai báo trong Platform Designer:
+ *
+ *   output reg readdatavalid;
+ *   always @(posedge clk) readdatavalid <= read; // hoặc theo fifo_dataValid
+ *
+ * Sau đó trong Platform Designer:
+ *   New Component → Signals → readdatavalid → gắn vào port này
+ *   Avalon Interface → "Read Latency" sẽ tự nhận biết dùng
+ *   readdatavalid, không cần cấu hình fixed latency nữa.
+ * ============================================================
+ */

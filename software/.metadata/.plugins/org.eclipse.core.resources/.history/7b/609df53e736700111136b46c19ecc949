@@ -1,0 +1,25 @@
+#include <stdio.h>
+
+// Thêm 'volatile' để ngăn compiler xóa vòng lặp rỗng
+void delay2(volatile int v)
+{
+    while(v--);
+}
+
+int main(void)
+{
+    // In ra dòng đầu để xác nhận CPU đã vào main()
+    printf("--- Nios II Test Start ---\n");
+    fflush(stdout);
+
+    while(1)
+    {
+        // Thêm \n để xuống dòng, hoặc dùng fflush(stdout);
+        printf("hello\n");
+
+        // Delay một khoảng thời gian (Số này tùy thuộc vào clock của FPGA, thường 50MHz)
+        delay2(1000000);
+    }
+
+    return 0;
+}

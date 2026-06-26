@@ -1,0 +1,19 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdbool.h>
+#include "system.h"
+#include "rx.h"
+
+
+
+int main()
+{
+  printf("------------------------------------\n");
+
+
+  Frame f;
+  while(1){
+	  readFrame(&f);
+  }
+  return 0;
+}

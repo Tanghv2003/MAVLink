@@ -1,0 +1,10 @@
+#include "system.h"
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+#define leds_addr LEDS_0_BASE
+
+void led_write(unsigned int value) {
+    *((volatile unsigned int *) leds_addr) = value;
+}

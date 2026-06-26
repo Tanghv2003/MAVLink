@@ -1,0 +1,11 @@
+#include "rx.h"
+
+int read(int addr){
+	return *(int *)RX_0_BASE + addr;
+}
+
+void is_done(){
+	return
+}
+
+

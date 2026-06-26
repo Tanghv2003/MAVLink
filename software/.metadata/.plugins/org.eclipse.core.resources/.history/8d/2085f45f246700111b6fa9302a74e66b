@@ -1,0 +1,15 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+#include "led.h"
+#include "tx.h"
+
+
+int main(){
+	SetLed(10);
+	char p[10] = {'H','e','l,'l','0''};
+	while(1){
+		send_statusText();
+	}
+	return 0;
+}

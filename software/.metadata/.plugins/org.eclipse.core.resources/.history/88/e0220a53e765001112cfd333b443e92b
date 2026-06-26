@@ -1,0 +1,112 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+
+#define RX_BASE   RX_0_BASE
+
+static inline uint32_t av_read(uint32_t base, uint32_t off) {
+    return *((volatile uint32_t *)(base + off));
+}
+
+static int has_packet(void) {
+    return (int)(av_read(RX_BASE, 0x108 * 4) & 0x1);
+}
+
+static void print_frame(int num) {
+    // Doc header
+    uint8_t  plen    = (uint8_t) (av_read(RX_BASE, 0x101 * 4) & 0xFF);
+    uint8_t  incompat= (uint8_t) (av_read(RX_BASE, 0x102 * 4) & 0xFF);
+    uint8_t  compat  = (uint8_t) (av_read(RX_BASE, 0x103 * 4) & 0xFF);
+    uint8_t  sys_id  = (uint8_t) (av_read(RX_BASE, 0x104 * 4) & 0xFF);
+    uint8_t  comp_id = (uint8_t) (av_read(RX_BASE, 0x105 * 4) & 0xFF);
+    uint32_t msg_id  =            av_read(RX_BASE, 0x106 * 4) & 0xFFFFFF;
+    uint8_t  seq     = (uint8_t) (av_read(RX_BASE, 0x107 * 4) & 0xFF);
+
+    // Doc payload tu FIFO
+    volatile int d = 500000;
+    while (d--);
+
+    uint8_t payload[256];
+    for (int i = 0; i < plen; i++) {
+        payload[i] = (uint8_t)(av_read(RX_BASE, 0x000) & 0xFF);
+    }
+
+    // Ghep raw frame de in
+    // [FD][LEN][INCOMPAT][COMPAT][SEQ][SYS][COMP][MID_L][MID_M][MID_H][PAYLOAD...][CRC_L][CRC_H]
+    // CRC khong co o day nen in 0x00 0x00 placeholder
+    uint8_t frame[300];
+    int idx = 0;
+    frame[idx++] = 0xFD;
+    frame[idx++] = plen;
+    frame[idx++] = incompat;
+    frame[idx++] = compat;
+    frame[idx++] = seq;
+    frame[idx++] = sys_id;
+    frame[idx++] = comp_id;
+    frame[idx++] = (uint8_t)( msg_id        & 0xFF);
+    frame[idx++] = (uint8_t)((msg_id >>  8) & 0xFF);
+    frame[idx++] = (uint8_t)((msg_id >> 16) & 0xFF);
+    for (int i = 0; i < plen; i++)
+        frame[idx++] = payload[i];
+
+    int total = idx;
+
+    // ── In full raw frame ─────────────────────────────────
+    printf("\n");
+    printf("======================================================\n");
+    printf("  Frame #%d  (%d bytes, no CRC)\n", num, total);
+    printf("======================================================\n");
+
+    printf("Raw: ");
+    for (int i = 0; i < total; i++)
+        printf("%02X ", frame[i]);
+    printf("\n");
+
+    printf("------------------------------------------------------\n");
+
+    // ── In tung field ─────────────────────────────────────
+    printf("  [00]      STX      : 0x%02X\n", frame[0]);
+    printf("  [01]      LEN      : 0x%02X  (%d bytes)\n", frame[1], frame[1]);
+    printf("  [02]      INCOMPAT : 0x%02X\n", frame[2]);
+    printf("  [03]      COMPAT   : 0x%02X\n", frame[3]);
+    printf("  [04]      SEQ      : 0x%02X  (%d)\n", frame[4], frame[4]);
+    printf("  [05]      SYS_ID   : 0x%02X  (%d)\n", frame[5], frame[5]);
+    printf("  [06]      COMP_ID  : 0x%02X  (%d)\n", frame[6], frame[6]);
+    printf("  [07-09]   MSG_ID   : %02X %02X %02X  (0x%06X)",
+           frame[7], frame[8], frame[9], (int)msg_id);
+
+    switch (msg_id) {
+        case 0:   printf(" = HEARTBEAT\n");   break;
+        case 1:   printf(" = SYS_STATUS\n");  break;
+        case 253: printf(" = STATUSTEXT\n");  break;
+        default:  printf(" = UNKNOWN\n");     break;
+    }
+
+    printf("  [10-%02d]   PAYLOAD  : ", 9 + plen);
+    for (int i = 0; i < plen; i++)
+        printf("%02X ", payload[i]);
+    printf("\n");
+
+    printf("------------------------------------------------------\n");
+
+    // Clear dataValid
+    av_read(RX_BASE, 0x108 * 4);
+}
+
+int main(void) {
+    printf("\n======================================================\n");
+    printf("  MAVLink v2 RX Monitor (continuous polling)\n");
+    printf("======================================================\n");
+    printf("Waiting for frames...\n");
+
+    int frame_count = 0;
+
+    while (1) {
+        if (has_packet()) {
+            frame_count++;
+            print_frame(frame_count);
+        }
+    }
+
+    return 0;
+}

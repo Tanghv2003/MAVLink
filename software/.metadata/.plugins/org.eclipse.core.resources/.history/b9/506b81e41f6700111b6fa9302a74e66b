@@ -1,0 +1,16 @@
+#include "tx.h"
+
+
+void write(int * addr, int value){
+	*addr = value;
+}
+bool wait_done(){
+	return (*(int*) ADDR_BUSY_REG ) && 0x01;
+}
+bool is_full(){
+	return (*(int*) ADDR_FIFO_FULL) && 0x01;
+}
+void send_frame(char *payload, int plen, int sys_id, int comp_id, int msg_id, int inc_flags, int cmp_flags){
+
+}
+

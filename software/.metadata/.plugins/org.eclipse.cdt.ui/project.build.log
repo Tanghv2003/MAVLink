@@ -1,0 +1,9 @@
+05:34:38 **** Build of configuration Nios II for project project ****
+make all 
+Info: Building ../proj/
+C:/intelFPGA_lite/18.1/nios2eds/bin/gnu/H-x86_64-mingw32/bin/make --no-print-directory -C ../proj/
+[BSP build complete]
+[project build complete]
+
+05:34:39 Build Finished (took 760ms)
+

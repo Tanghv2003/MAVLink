@@ -1,0 +1,15 @@
+/*
+ * led.c
+ *
+ *  Created on: Jun 19, 2026
+ *      Author: tangh
+ */
+
+
+#pragma once
+#include "system.h"
+
+
+
+void SetLed(int value);
+int GetLed();

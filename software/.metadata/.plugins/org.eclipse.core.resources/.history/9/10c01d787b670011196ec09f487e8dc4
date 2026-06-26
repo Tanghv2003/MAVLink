@@ -1,0 +1,206 @@
+#include <stdio.h>
+#include "system.h"
+#include <stdint.h>
+#include <string.h>
+
+#define TX_BASE  TX_0_BASE
+#define RX_BASE  RX_0_BASE
+
+#define RD(base, o)    (*((volatile uint32_t *)((base) + (o)*4)))
+#define WR(base, o, v) (*((volatile uint32_t *)((base) + (o)*4)) = (v))
+
+/* Register map */
+#define REG_FIFO        0x000   /* FIFO data (đọc 1 byte mỗi lần) */
+#define REG_FIFO_EMPTY  0x10A   /* bit[0] = 1 → FIFO rỗng         */
+
+/* MAVLink v2 constants */
+#define MAVLINK_V2_STX          0xFD
+#define MAVLINK_V2_HEADER_LEN   10      /* STX + LEN + INC + CMP + SEQ + SYS + COMP + MSG0 + MSG1 + MSG2 */
+#define MAVLINK_V2_CRC_LEN      2
+#define MAVLINK_MAX_PAYLOAD     255
+
+/* MAVLink v2 frame structure */
+typedef struct {
+    uint8_t  stx;           /* 0xFD                    */
+    uint8_t  len;           /* Payload length (0-255)  */
+    uint8_t  incompat_flags;
+    uint8_t  compat_flags;
+    uint8_t  seq;           /* Sequence number         */
+    uint8_t  sysid;         /* System ID               */
+    uint8_t  compid;        /* Component ID            */
+    uint32_t msgid;         /* Message ID (24-bit)     */
+    uint8_t  payload[MAVLINK_MAX_PAYLOAD];
+    uint16_t checksum;      /* CRC-16/MCRF4XX          */
+} mavlink_v2_frame_t;
+
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                             */
+/* ------------------------------------------------------------------ */
+
+static inline int fifo_empty(void) {
+    return (RD(RX_BASE, REG_FIFO_EMPTY) & 1);
+}
+
+static inline uint8_t fifo_read_byte(void) {
+    return (uint8_t)(RD(RX_BASE, REG_FIFO) & 0xFF);
+}
+
+/**
+ * Đọc đúng 1 byte từ FIFO, chờ tới khi có dữ liệu.
+ * Trả về 0 nếu timeout, 1 nếu thành công.
+ */
+static int read_byte_timeout(uint8_t *out, int timeout) {
+    while (fifo_empty()) {
+        if (--timeout <= 0) return 0;
+    }
+    *out = fifo_read_byte();
+    return 1;
+}
+
+/* CRC-16/MCRF4XX (chuẩn MAVLink) */
+static uint16_t crc16_mcrf4xx(uint16_t crc, uint8_t byte) {
+    uint8_t tmp = byte ^ (uint8_t)(crc & 0xFF);
+    tmp ^= (tmp << 4);
+    crc = (crc >> 8) ^ ((uint16_t)tmp << 8) ^ ((uint16_t)tmp << 3) ^ ((uint16_t)tmp >> 4);
+    return crc;
+}
+
+static uint16_t mavlink_crc(const uint8_t *header_from_len, uint8_t header_bytes,
+                             const uint8_t *payload, uint8_t payload_len,
+                             uint8_t crc_extra) {
+    uint16_t crc = 0xFFFF;
+    for (uint8_t i = 0; i < header_bytes; i++)
+        crc = crc16_mcrf4xx(crc, header_from_len[i]);
+    for (uint8_t i = 0; i < payload_len; i++)
+        crc = crc16_mcrf4xx(crc, payload[i]);
+    crc = crc16_mcrf4xx(crc, crc_extra);
+    return crc;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Decoder chính                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Đọc và decode 1 frame MAVLink v2 từ FIFO.
+ * Trả về 1 nếu decode thành công, 0 nếu lỗi/timeout.
+ */
+int mavlink_v2_decode(mavlink_v2_frame_t *frame) {
+    uint8_t byte;
+    int timeout = 1000000;
+
+    /* 1. Tìm STX = 0xFD */
+    do {
+        if (!read_byte_timeout(&byte, timeout)) {
+            printf("FAIL: Timeout chờ STX\n");
+            return 0;
+        }
+    } while (byte != MAVLINK_V2_STX);
+
+    frame->stx = byte;
+
+    /* 2. Đọc phần còn lại của header (9 bytes) */
+    uint8_t hdr[9];
+    for (int i = 0; i < 9; i++) {
+        if (!read_byte_timeout(&hdr[i], timeout)) {
+            printf("FAIL: Timeout đọc header byte %d\n", i);
+            return 0;
+        }
+    }
+
+    frame->len           = hdr[0];
+    frame->incompat_flags = hdr[1];
+    frame->compat_flags  = hdr[2];
+    frame->seq           = hdr[3];
+    frame->sysid         = hdr[4];
+    frame->compid        = hdr[5];
+    /* Message ID: 24-bit, little-endian (3 bytes) */
+    frame->msgid = (uint32_t)hdr[6]
+                 | ((uint32_t)hdr[7] << 8)
+                 | ((uint32_t)hdr[8] << 16);
+
+    if (frame->len > MAVLINK_MAX_PAYLOAD) {
+        printf("FAIL: payload_len=%d vượt quá giới hạn\n", frame->len);
+        return 0;
+    }
+
+    /* 3. Đọc payload */
+    for (int i = 0; i < frame->len; i++) {
+        if (!read_byte_timeout(&frame->payload[i], timeout)) {
+            printf("FAIL: Timeout đọc payload byte %d\n", i);
+            return 0;
+        }
+    }
+
+    /* 4. Đọc checksum (2 bytes, little-endian) */
+    uint8_t crc_lo, crc_hi;
+    if (!read_byte_timeout(&crc_lo, timeout) ||
+        !read_byte_timeout(&crc_hi, timeout)) {
+        printf("FAIL: Timeout đọc checksum\n");
+        return 0;
+    }
+    frame->checksum = (uint16_t)crc_lo | ((uint16_t)crc_hi << 8);
+
+    /* 5. Verify CRC
+     *    CRC_EXTRA phụ thuộc vào message ID — điền vào đây nếu biết.
+     *    Tạm để 0 nếu chưa có bảng CRC_EXTRA.
+     */
+    uint8_t crc_extra = 0x00;  /* <-- thay bằng giá trị đúng theo msg_id */
+    uint16_t crc_calc = mavlink_crc(hdr, 9, frame->payload, frame->len, crc_extra);
+
+    if (crc_calc != frame->checksum) {
+        printf("WARN: CRC mismatch (calc=0x%04X, recv=0x%04X)\n",
+               crc_calc, frame->checksum);
+        /* Vẫn trả về 1 — bạn có thể đổi thành 0 nếu muốn reject frame lỗi */
+    }
+
+    return 1;
+}
+
+/* ------------------------------------------------------------------ */
+/*  In thông tin frame                                                  */
+/* ------------------------------------------------------------------ */
+
+void mavlink_print_frame(const mavlink_v2_frame_t *f) {
+    printf("=== MAVLink v2 Frame ===\n");
+    printf("  STX          : 0x%02X\n", f->stx);
+    printf("  Payload len  : %d\n",     f->len);
+    printf("  Incompat flag: 0x%02X\n", f->incompat_flags);
+    printf("  Compat flag  : 0x%02X\n", f->compat_flags);
+    printf("  Sequence     : %d\n",     f->seq);
+    printf("  System ID    : %d\n",     f->sysid);
+    printf("  Component ID : %d\n",     f->compid);
+    printf("  Message ID   : 0x%06X\n", f->msgid);
+    printf("  Checksum     : 0x%04X\n", f->checksum);
+    printf("  Payload (hex):");
+    for (int i = 0; i < f->len; i++) {
+        if (i % 16 == 0) printf("\n    ");
+        printf("%02X ", f->payload[i]);
+    }
+    printf("\n");
+}
+
+/* ------------------------------------------------------------------ */
+/*  main                                                                */
+/* ------------------------------------------------------------------ */
+
+int main(void) {
+    printf("=== MAVLink v2 Loopback Decode Test ===\n");
+
+    if (fifo_empty()) {
+        printf("FAIL: FIFO rỗng, không có dữ liệu\n");
+        return 0;
+    }
+
+    mavlink_v2_frame_t frame;
+    memset(&frame, 0, sizeof(frame));
+
+    if (mavlink_v2_decode(&frame)) {
+        printf("PASS: Decode thành công!\n");
+        mavlink_print_frame(&frame);
+    } else {
+        printf("FAIL: Decode thất bại\n");
+    }
+
+    return 0;
+}

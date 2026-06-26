@@ -1,0 +1,332 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+#include "altera_avalon_uart_regs.h"
+
+#define MAV_BASE   TX_0_BASE
+#define UART_BASE  UART_0_BASE
+
+#define MAV_STX_V2   0xFD
+#define HDR_SIZE_V2  10
+#define CRC_SIZE      2
+
+#define CRC_INIT 0xFFFF
+
+static uint16_t crc_acc(uint8_t data, uint16_t crc) {
+    uint8_t tmp = data ^ (uint8_t)(crc & 0xFF);
+    tmp ^= (tmp << 4);
+    return (crc >> 8)
+         ^ ((uint16_t)tmp << 8)
+         ^ ((uint16_t)tmp << 3)
+         ^ ((uint16_t)tmp >> 4);
+}
+
+static uint8_t get_crc_extra(uint32_t msg_id) {
+    switch (msg_id) {
+        case 0:   return 50;
+        case 253: return 83;
+        default:  return 0;
+    }
+}
+
+static uint16_t calc_crc_v2(uint8_t plen,
+                              uint8_t incompat, uint8_t compat,
+                              uint8_t seq,
+                              uint8_t sys,     uint8_t comp,
+                              uint32_t msg_id,
+                              const uint8_t *payload,
+                              uint8_t crc_extra) {
+    uint16_t crc = CRC_INIT;
+    crc = crc_acc(plen,                    crc);
+    crc = crc_acc(incompat,                crc);
+    crc = crc_acc(compat,                  crc);
+    crc = crc_acc(seq,                     crc);
+    crc = crc_acc(sys,                     crc);
+    crc = crc_acc(comp,                    crc);
+    crc = crc_acc((msg_id      ) & 0xFF,   crc);
+    crc = crc_acc((msg_id >>  8) & 0xFF,   crc);
+    crc = crc_acc((msg_id >> 16) & 0xFF,   crc);
+    for (int i = 0; i < plen; i++)
+        crc = crc_acc(payload[i], crc);
+    crc = crc_acc(crc_extra, crc);
+    return crc;
+}
+
+static inline void av_write(uint32_t base, uint32_t off, uint32_t val) {
+    *((volatile uint32_t *)(base + off)) = val;
+}
+
+static inline uint32_t av_read(uint32_t base, uint32_t off) {
+    return *((volatile uint32_t *)(base + off));
+}
+
+static int uart_rx_byte(void) {
+    int timeout = 3000000;
+    while (timeout--) {
+        uint16_t st = IORD_ALTERA_AVALON_UART_STATUS(UART_BASE);
+        if (st & ALTERA_AVALON_UART_STATUS_RRDY_MSK)
+            return (int)(IORD_ALTERA_AVALON_UART_RXDATA(UART_BASE) & 0xFF);
+    }
+    return -1;
+}
+
+static int fifo_write(const uint8_t *data, uint8_t len) {
+    for (int i = 0; i < len; i++) {
+        if (av_read(MAV_BASE, 0x107 * 4) & 0x1) {
+            printf("  [ERR] FIFO full at byte %d\n", i);
+            return -1;
+        }
+        av_write(MAV_BASE, 0x000, data[i]);
+    }
+    return 0;
+}
+
+static int mavlink_v2_send(uint8_t sys,    uint8_t comp,
+                            uint32_t msg_id,
+                            uint8_t incompat, uint8_t compat,
+                            const uint8_t *payload, uint8_t plen) {
+    if (av_read(MAV_BASE, 0x109 * 4) & 0x1) {
+        printf("  [ERR] MAVLink busy!\n");
+        return -1;
+    }
+
+    fifo_write(payload, plen);
+
+    av_write(MAV_BASE, 0x100 * 4, plen);
+    av_write(MAV_BASE, 0x101 * 4, incompat);
+    av_write(MAV_BASE, 0x102 * 4, compat);
+    av_write(MAV_BASE, 0x103 * 4, sys);
+    av_write(MAV_BASE, 0x104 * 4, comp);
+    av_write(MAV_BASE, 0x105 * 4, msg_id & 0xFFFFFF);
+    av_write(MAV_BASE, 0x106 * 4, 0x1);
+
+    int timeout = 5000000;
+    while (av_read(MAV_BASE, 0x109 * 4) & 0x1) {
+        if (--timeout == 0) {
+            printf("  [ERR] TX timeout!\n");
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int recv_frame(uint8_t *buf, int total) {
+    for (int i = 0; i < total; i++) {
+        int b = uart_rx_byte();
+        if (b < 0) {
+            printf("  [ERR] RX timeout at byte %d\n", i);
+            return -1;
+        }
+        buf[i] = (uint8_t)b;
+    }
+    return 0;
+}
+
+static int verify_v2(const uint8_t *frame, int total,
+                      const uint8_t *payload, uint8_t plen,
+                      uint8_t sys,  uint8_t comp,
+                      uint32_t msg_id,
+                      uint8_t incompat, uint8_t compat) {
+    int pass = 1;
+
+    printf("\n--- RAW FRAME (%d bytes) ---\n", total);
+    for (int i = 0; i < total; i++) {
+        const char *label = "";
+        if      (i == 0)                    label = "STX";
+        else if (i == 1)                    label = "LEN";
+        else if (i == 2)                    label = "INCOMPAT";
+        else if (i == 3)                    label = "COMPAT";
+        else if (i == 4)                    label = "SEQ";
+        else if (i == 5)                    label = "SYS_ID";
+        else if (i == 6)                    label = "COMP_ID";
+        else if (i == 7)                    label = "MSG_ID_L";
+        else if (i == 8)                    label = "MSG_ID_M";
+        else if (i == 9)                    label = "MSG_ID_H";
+        else if (i >= 10 && i < 10 + plen)  label = "PAYLOAD";
+        else if (i == 10 + plen)            label = "CRC_L";
+        else if (i == 10 + plen + 1)        label = "CRC_H";
+        printf("  [%02d] 0x%02X  %s\n", i, frame[i], label);
+    }
+
+    printf("\n--- VERIFY ---\n");
+
+    if (frame[0] == MAV_STX_V2)
+        printf("  [OK]   STX      = 0xFD\n");
+    else {
+        printf("  [FAIL] STX      = 0x%02X (expect 0xFD)\n", frame[0]);
+        pass = 0;
+    }
+
+    if (frame[1] == plen)
+        printf("  [OK]   LEN      = %d\n", frame[1]);
+    else {
+        printf("  [FAIL] LEN      = %d (expect %d)\n", frame[1], plen);
+        pass = 0;
+    }
+
+    if (frame[2] == incompat)
+        printf("  [OK]   INCOMPAT = 0x%02X\n", frame[2]);
+    else {
+        printf("  [FAIL] INCOMPAT = 0x%02X (expect 0x%02X)\n", frame[2], incompat);
+        pass = 0;
+    }
+
+    if (frame[3] == compat)
+        printf("  [OK]   COMPAT   = 0x%02X\n", frame[3]);
+    else {
+        printf("  [FAIL] COMPAT   = 0x%02X (expect 0x%02X)\n", frame[3], compat);
+        pass = 0;
+    }
+
+    printf("         SEQ     = %d\n", frame[4]);
+
+    if (frame[5] == sys)
+        printf("  [OK]   SYS_ID  = %d\n", frame[5]);
+    else {
+        printf("  [FAIL] SYS_ID  = %d (expect %d)\n", frame[5], sys);
+        pass = 0;
+    }
+
+    if (frame[6] == comp)
+        printf("  [OK]   COMP_ID = %d\n", frame[6]);
+    else {
+        printf("  [FAIL] COMP_ID = %d (expect %d)\n", frame[6], comp);
+        pass = 0;
+    }
+
+    uint32_t msg_recv = (uint32_t)frame[7]
+                      | ((uint32_t)frame[8] << 8)
+                      | ((uint32_t)frame[9] << 16);
+    if (msg_recv == msg_id)
+        printf("  [OK]   MSG_ID  = 0x%06X\n", (int)msg_recv);
+    else {
+        printf("  [FAIL] MSG_ID  = 0x%06X (expect 0x%06X)\n",
+               (int)msg_recv, (int)msg_id);
+        pass = 0;
+    }
+
+    printf("  PAYLOAD recv: ");
+    int pl_ok = 1;
+    for (int i = 0; i < plen; i++) {
+        printf("0x%02X ", frame[10 + i]);
+        if (frame[10 + i] != payload[i]) pl_ok = 0;
+    }
+    printf("\n");
+    printf("  PAYLOAD expt: ");
+    for (int i = 0; i < plen; i++)
+        printf("0x%02X ", payload[i]);
+    printf("\n");
+
+    if (pl_ok)
+        printf("  [OK]   Payload matched\n");
+    else {
+        printf("  [FAIL] Payload mismatch!\n");
+        pass = 0;
+    }
+
+    uint8_t  crc_extra = get_crc_extra(msg_id);
+    uint16_t crc_calc  = calc_crc_v2(plen, incompat, compat,
+                                      frame[4],
+                                      sys, comp, msg_id,
+                                      payload, crc_extra);
+    uint16_t crc_recv  = (uint16_t)frame[10 + plen]
+                       | ((uint16_t)frame[10 + plen + 1] << 8);
+
+    printf("  CRC recv = 0x%04X\n", (int)crc_recv);
+    printf("  CRC calc = 0x%04X (extra=0x%02X)\n", (int)crc_calc, crc_extra);
+
+    if (crc_recv == crc_calc)
+        printf("  [OK]   CRC matched\n");
+    else {
+        printf("  [FAIL] CRC mismatch!\n");
+        pass = 0;
+    }
+
+    printf("\n");
+    if (pass) printf("  *** TEST PASSED ***\n");
+    else      printf("  *** TEST FAILED ***\n");
+    return pass;
+}
+
+static void run_test_v2(const char *name,
+                         uint8_t sys,  uint8_t comp,
+                         uint32_t msg_id,
+                         uint8_t incompat, uint8_t compat,
+                         const uint8_t *payload, uint8_t plen) {
+    int total = HDR_SIZE_V2 + plen + CRC_SIZE;
+    uint8_t frame[300];
+
+    printf("\n========== %s ==========\n", name);
+    printf("SYS=%d COMP=%d MSG_ID=0x%06X LEN=%d\n",
+           sys, comp, (int)msg_id, plen);
+
+    if (mavlink_v2_send(sys, comp, msg_id,
+                        incompat, compat,
+                        payload, plen) < 0) return;
+
+    printf("TX done, waiting RX (%d bytes)...\n", total);
+
+    volatile int d = total * 100000;
+    while (d--);
+
+    if (recv_frame(frame, total) < 0) return;
+
+    verify_v2(frame, total, payload, plen,
+              sys, comp, msg_id, incompat, compat);
+}
+
+int main(void) {
+    printf("\n====================================\n");
+    printf("  MAVLink v2 Loopback Test (UART)\n");
+    printf("====================================\n");
+
+    printf("FIFO empty   = %d (expect 1)\n",
+           (int)(av_read(MAV_BASE, 0x108 * 4) & 1));
+    printf("FIFO full    = %d (expect 0)\n",
+           (int)(av_read(MAV_BASE, 0x107 * 4) & 1));
+    printf("MAVLink busy = %d (expect 0)\n",
+           (int)(av_read(MAV_BASE, 0x109 * 4) & 1));
+
+    // Test 1: HEARTBEAT
+    {
+        uint8_t pl[] = {0x00, 0x00, 0x00, 0x00,
+                        0x06, 0x08, 0x00, 0x04, 0x03};
+        run_test_v2("TEST 1: HEARTBEAT",
+                    1, 1, 0x000000,
+                    0x00, 0x00,
+                    pl, sizeof(pl));
+    }
+
+    // Test 2: HEARTBEAT seq+1
+    {
+        uint8_t pl[] = {0x00, 0x00, 0x00, 0x00,
+                        0x06, 0x08, 0x00, 0x04, 0x03};
+        run_test_v2("TEST 2: HEARTBEAT seq+1",
+                    1, 1, 0x000000,
+                    0x00, 0x00,
+                    pl, sizeof(pl));
+    }
+
+    // Test 3: STATUSTEXT
+    {
+        uint8_t pl[] = {0x06,
+                        'T','E','S','T',0,0,0,0,0,0};
+        run_test_v2("TEST 3: STATUSTEXT",
+                    1, 1, 0x0000FD,
+                    0x00, 0x00,
+                    pl, sizeof(pl));
+    }
+
+    // Test 4: Zero payload
+    {
+        run_test_v2("TEST 4: Zero payload",
+                    1, 1, 0x000000,
+                    0x00, 0x00,
+                    (uint8_t[]){0}, 0);
+    }
+
+    printf("\n====================================\n");
+    printf("  ALL TESTS DONE\n");
+    printf("====================================\n");
+    return 0;
+}

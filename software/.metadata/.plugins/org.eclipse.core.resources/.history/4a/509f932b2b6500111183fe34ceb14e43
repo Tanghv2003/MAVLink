@@ -1,0 +1,39 @@
+#include <stdio.h>
+#include "system.h"
+
+#define LED_ADDR  LEDS_0_BASE
+#define LED_ON    0x3FF
+#define LED_OFF   0x000
+
+void led_write(unsigned int v) {
+    *((volatile unsigned int *) LED_ADDR) = v;
+}
+
+int main() {
+    char c;
+    led_write(LED_OFF);
+    printf("Hello from Nios IIa!\n");
+    printf("1: on | 2: off\n");
+    fflush(stdout);
+
+    while (1) {
+        c = getchar();
+
+
+        if (c == '\n' || c == '\r' || c == ' ') continue;
+
+        if (c == '1') {
+            led_write(LED_ON);
+            printf("LED ON\n");
+            fflush(stdout);
+        } else if (c == '2') {
+            led_write(LED_OFF);
+            printf("LED OFF\n");
+            fflush(stdout);
+        } else {
+            printf("1: on | 2: off\n");
+            fflush(stdout);
+        }
+    }
+    return 0;
+}

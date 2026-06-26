@@ -1,0 +1,13 @@
+/*
+ * main.cpp
+ *
+ *  Created on: Jun 14, 2026
+ *      Author: tangh
+ */
+#include <stdio.h>
+int main(){
+	cout <<"abc \n";
+}
+
+
+

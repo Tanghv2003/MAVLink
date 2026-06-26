@@ -1,0 +1,25 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+
+#define BASE     ((uintptr_t)RX_0_BASE)
+#define RD(o)    (*((volatile uint32_t *)(BASE + ((o) << 2))))
+
+#define FIFO      0x000u
+#define IS_EMPTY  0x10Au
+
+static uint8_t fifo_read(void) {
+    while (RD(IS_EMPTY) & 1);
+    return (uint8_t)RD(FIFO);
+}
+
+int main(void) {
+    printf("=== MAVLink RX ===\n");
+
+    while (1) {
+        uint8_t stx = fifo_read();
+
+
+
+    }
+}

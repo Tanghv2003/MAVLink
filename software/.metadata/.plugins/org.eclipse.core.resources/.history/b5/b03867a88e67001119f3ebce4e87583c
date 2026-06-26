@@ -1,0 +1,25 @@
+#include <stdio.h>
+#include "system.h"
+#include <stdint.h>
+#include <string.h>
+#include "rx.h"
+
+void delay(int v){
+	while(v--);
+}
+
+int main(void) {
+    printf("=== MAVLink v22 Decoder ===\n");
+
+    Frame frame;
+    int count = 0;
+
+    while (1) {
+        memset(&frame, 0, sizeof(frame));
+        readFrame(&frame);
+        printFrame(&frame);
+        delay(50000);
+    }
+
+    return 0;
+}

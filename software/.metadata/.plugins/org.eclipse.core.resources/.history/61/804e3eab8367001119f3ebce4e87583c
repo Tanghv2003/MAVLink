@@ -1,0 +1,32 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+
+#include <stdio.h>
+#include "system.h"
+#include <stdint.h>
+
+#define RX_BASE  RX_0_BASE
+#define RD(base, o)  (*((volatile uint32_t *)((base) + (o)*4)))
+
+int main(void) {
+    printf("=== Raw Register Dump ===\n");
+    printf("RX_0_BASE   = 0x%08X\n", (unsigned int)RX_0_BASE);
+
+    while (1) {
+        printf("----------\n");
+        printf("PAYLOAD_LEN = 0x%08X\n", (unsigned int)RD(RX_BASE, 0x101));
+        printf("SYS_ID      = 0x%08X\n", (unsigned int)RD(RX_BASE, 0x104));
+        printf("MSG_ID      = 0x%08X\n", (unsigned int)RD(RX_BASE, 0x106));
+        printf("DATA_VALID  = 0x%08X\n", (unsigned int)RD(RX_BASE, 0x108));
+        printf("FIFO_EMPTY  = 0x%08X\n", (unsigned int)RD(RX_BASE, 0x10A));
+
+        /* delay */
+        volatile int d = 2000000;
+        while (d--);
+    }
+
+    return 0;
+}
+
+

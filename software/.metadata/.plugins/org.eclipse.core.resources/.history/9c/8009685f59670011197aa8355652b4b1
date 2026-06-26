@@ -1,0 +1,63 @@
+#include <stdio.h>
+#include "system.h"
+#include <stdint.h>
+
+#define TX_BASE  TX_0_BASE
+#define RX_BASE  RX_0_BASE
+
+// Byte address = word_offset * 4
+#define RD(base, o)    (*((volatile uint32_t *)((base) + ((o) << 2))))
+#define WR(base, o, v) (*((volatile uint32_t *)((base) + ((o) << 2))) = (v))
+
+// RX register offsets (word address)
+#define RX_FIFO         0x000
+#define RX_PAYLOAD_LEN  0x101
+#define RX_INCOMPAT     0x102
+#define RX_COMPAT       0x103
+#define RX_SYS_ID       0x104
+#define RX_COMP_ID      0x105
+#define RX_MSG_ID       0x106
+#define RX_SEQ          0x107
+#define RX_DATA_VALID   0x108
+#define RX_CLEAR        0x109
+
+int main(void) {
+    printf("=== Loopback Test ===\n");
+
+    // -------------------------------------------------------
+    // TODO: Gửi frame MAVLink qua TX trước
+    // WR(TX_BASE, TX_REG_..., value);
+    // -------------------------------------------------------
+
+    // Poll dataValid với timeout
+    int timeout = 2000000;
+    while (!(RD(RX_BASE, RX_DATA_VALID) & 1) && --timeout);
+
+    if (timeout <= 0) {
+        printf("FAIL: Timeout, no frame received\n");
+        return -1;
+    }
+
+    // Đọc header
+    printf("PASS: Frame received!\n");
+    printf("  payload_len  = %d\n",     (int)(RD(RX_BASE, RX_PAYLOAD_LEN) & 0xFF));
+    printf("  incompat     = 0x%02X\n", (int)(RD(RX_BASE, RX_INCOMPAT)    & 0xFF));
+    printf("  compat       = 0x%02X\n", (int)(RD(RX_BASE, RX_COMPAT)      & 0xFF));
+    printf("  sys_id       = %d\n",     (int)(RD(RX_BASE, RX_SYS_ID)      & 0xFF));
+    printf("  comp_id      = %d\n",     (int)(RD(RX_BASE, RX_COMP_ID)     & 0xFF));
+    printf("  msg_id       = 0x%06X\n", (int)(RD(RX_BASE, RX_MSG_ID)      & 0xFFFFFF));
+    printf("  seq          = %d\n",     (int)(RD(RX_BASE, RX_SEQ)         & 0xFF));
+
+    // Đọc payload từ FIFO
+    int len = (int)(RD(RX_BASE, RX_PAYLOAD_LEN) & 0xFF);
+    printf("  payload      = ");
+    for (int i = 0; i < len; i++) {
+        printf("%02X ", (int)(RD(RX_BASE, RX_FIFO) & 0xFF));
+    }
+    printf("\n");
+
+    // Clear dataValid để nhận packet tiếp theo
+    WR(RX_BASE, RX_CLEAR, 1);
+
+    return 0;
+}

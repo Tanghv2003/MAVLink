@@ -1,0 +1,32 @@
+/*
+ * main.cpp
+ *
+ *  Created on: Jun 11, 2026
+ *      Author: tangh
+ */
+#include <stdio.h>
+#include <unistd.h>
+
+int main() {
+    printf("================================\n");
+    printf("  JTAG UART Demo - DE0-CV\n");
+    printf("  Nios II is running!\n");
+    printf("================================\n\n");
+
+    int count = 0;
+
+    while (1) {
+        printf("[%d] Hello from FPGA!\n", count++);
+        usleep(1000000);
+
+        int c = getchar();
+        if (c != EOF) {
+            printf(">>> Received: '%c' (ASCII: %d)\n\n", (char)c, c);
+        }
+    }
+
+    return 0;
+}
+
+
+

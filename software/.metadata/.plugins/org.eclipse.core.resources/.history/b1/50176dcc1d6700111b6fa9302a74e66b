@@ -1,0 +1,12 @@
+#include "tx.h"
+
+bool wait_done(){
+	return (*(int*) ADDR_BUSY_REG ) && 0x01;
+}
+bool is_full(){
+	return (*(int*) ADDR_FIFO_FULL) && 0x01;
+}
+void send_frame(){
+
+}
+

@@ -1,0 +1,35 @@
+#include <stdio.h>
+#include "system.h"
+#include <stdint.h>
+
+#define RX_BASE  RX_0_BASE
+
+#define RD(base, o)  (*((volatile uint32_t *)((base) + (o)*4)))
+
+#define REG_FIFO_EMPTY  0x10A
+
+static void delay(volatile int count) {
+    while (count-- > 0);
+}
+
+int main(void) {
+    printf("=== FIFO Status Monitor ===\n");
+
+    int prev = -1;
+
+    while (1) {
+        int empty = (RD(RX_BASE, REG_FIFO_EMPTY) & 1);
+
+        if (empty != prev) {
+            if (empty)
+                printf("[FIFO] EMPTY\n");
+            else
+                printf("[FIFO] HAS DATA\n");
+            prev = empty;
+        }
+
+        delay(50000);   /* ~vài chục ms tùy clock */
+    }
+
+    return 0;
+}

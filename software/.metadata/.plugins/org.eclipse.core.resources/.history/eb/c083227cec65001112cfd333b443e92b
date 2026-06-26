@@ -1,0 +1,46 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+
+#define RX    RX_0_BASE
+#define RD(o) (*((volatile uint32_t *)(RX + (o)*4)))
+
+int main(void) {
+    printf("MAVLink v2 RX Monitor\n");
+    printf("RX_BASE = 0x%08X\n", (int)RX_0_BASE);
+
+    // In trang thai ban dau
+    printf("dataValid = %d\n", (int)(RD(0x108) & 1));
+
+    int n      = 0;
+    int count  = 0;
+
+    while (1) {
+        // In dau hieu hoat dong moi 5 trieu vong
+        if (++count >= 5000000) {
+            count = 0;
+            printf("Polling... dataValid=%d\n",
+                   (int)(RD(0x108) & 1));
+        }
+
+        if (!(RD(0x108) & 1)) continue;
+
+        uint8_t  plen = RD(0x101);
+        uint32_t mid  = RD(0x106) & 0xFFFFFF;
+
+        printf("\n-- Frame #%d  MSG=0x%06X  LEN=%d  SYS=%d  SEQ=%d\n",
+               ++n, (int)mid, plen,
+               (int)(RD(0x104) & 0xFF),
+               (int)(RD(0x107) & 0xFF));
+
+        printf("Payload: ");
+        for (int i = 0; i < plen; i++) {
+            volatile int d = 60000; while (d--);
+            printf("%02X ", (int)(RD(0x000) & 0xFF));
+        }
+        printf("\n");
+
+        RD(0x108);
+        volatile int w = 100; while (w--);
+    }
+}

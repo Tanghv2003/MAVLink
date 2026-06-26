@@ -1,0 +1,73 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+
+#define RX_BASE   RX_0_BASE
+
+static inline uint32_t av_read(uint32_t base, uint32_t off) {
+    return *((volatile uint32_t *)(base + off));
+}
+
+static int has_packet(void) {
+    return (int)(av_read(RX_BASE, 0x108 * 4) & 0x1);
+}
+
+static void read_payload(uint8_t plen) {
+    printf("  payload (%d bytes): ", plen);
+    for (int i = 0; i < plen; i++) {
+        uint32_t val = av_read(RX_BASE, 0x000);
+        printf("0x%02X ", (int)(val & 0xFF));
+    }
+    printf("\n");
+}
+
+static void print_frame(int num) {
+    uint8_t  plen    = (uint8_t) (av_read(RX_BASE, 0x101 * 4) & 0xFF);
+    uint8_t  incompat= (uint8_t) (av_read(RX_BASE, 0x102 * 4) & 0xFF);
+    uint8_t  compat  = (uint8_t) (av_read(RX_BASE, 0x103 * 4) & 0xFF);
+    uint8_t  sys_id  = (uint8_t) (av_read(RX_BASE, 0x104 * 4) & 0xFF);
+    uint8_t  comp_id = (uint8_t) (av_read(RX_BASE, 0x105 * 4) & 0xFF);
+    uint32_t msg_id  =            av_read(RX_BASE, 0x106 * 4) & 0xFFFFFF;
+    uint8_t  seq     = (uint8_t) (av_read(RX_BASE, 0x107 * 4) & 0xFF);
+
+    printf("\n========== Frame #%d ==========\n", num);
+    printf("  SEQ     = %d\n",     (int)seq);
+    printf("  SYS_ID  = %d\n",     (int)sys_id);
+    printf("  COMP_ID = %d\n",     (int)comp_id);
+    printf("  MSG_ID  = 0x%06X",   (int)msg_id);
+
+    switch (msg_id) {
+        case 0:   printf(" (HEARTBEAT)\n");   break;
+        case 1:   printf(" (SYS_STATUS)\n");  break;
+        case 253: printf(" (STATUSTEXT)\n");  break;
+        default:  printf(" (UNKNOWN)\n");     break;
+    }
+
+    printf("  INCOMPAT= 0x%02X\n", (int)incompat);
+    printf("  COMPAT  = 0x%02X\n", (int)compat);
+    printf("  LEN     = %d\n",     (int)plen);
+
+    read_payload(plen);
+
+    // Clear dataValid bang cach doc lai 0x108
+    av_read(RX_BASE, 0x108 * 4);
+}
+
+int main(void) {
+    printf("\n====================================\n");
+    printf("  MAVLink v2 RX Monitor (polling)\n");
+    printf("====================================\n");
+    printf("Listening continuously...\n\n");
+
+    int frame_count = 0;
+
+    while (1) {
+        if (has_packet()) {
+            frame_count++;
+            print_frame(frame_count);
+        }
+        // Khong co packet: loop tiep, khong block
+    }
+
+    return 0;
+}

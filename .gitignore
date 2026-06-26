@@ -1,0 +1,33 @@
+src/
+db/
+incremental_db/
+output_files/*.sof
+output_files/*.pof
+output_files/*.jdi
+output_files/*.pin
+output_files/*.smsg
+output_files/*.rpt
+output_files/*.summary
+output_files/*.done
+output_files/*.fit.*
+output_files/*.asm.*
+output_files/*.sta.*
+output_files/*.map.*
+*.qws
+*.bak
+*~
+
+# Simulation
+simulation/
+
+# Qsys generated (giữ .qsys, bỏ generated files)
+.qsys_edit/
+proj/synthesis/
+proj/testbench/
+
+# Software build artifacts
+software/*/obj/
+software/*/Debug/
+software/*/.metadata/
+software/*/BSP/
+EOF

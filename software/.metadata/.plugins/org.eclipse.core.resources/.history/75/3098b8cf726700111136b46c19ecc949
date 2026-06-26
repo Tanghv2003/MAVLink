@@ -1,0 +1,34 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <unistd.h>
+#include "system.h"
+#include <io.h>         // BẮT BUỘC: Thư viện I/O của Nios II (Altera HAL)
+
+// Đảm bảo tên BASE ADDRESS khớp chính xác với định nghĩa trong system.h (được sinh ra từ Qsys)
+#define BASE     ((uintptr_t)RX_0_BASE)
+
+// Sử dụng IORD_32DIRECT để đọc bộ nhớ trực tiếp (Bypass Hardware Data Cache)
+// Tham số thứ 2 là byte offset, nên (o) << 2 là hoàn toàn chuẩn xác.
+#define RD(o)    IORD_32DIRECT(BASE, ((o) << 2))
+
+#define FIFO      0x000u
+#define IS_EMPTY  0x10Au
+
+// debug counter
+static uint32_t loop_cnt = 0;
+
+
+void delay(int v){
+
+	while(v--);
+}
+int main(void)
+{
+    while(1){
+    	printf("hello");
+    	delay(10000000);
+    }
+
+    return 0;
+}

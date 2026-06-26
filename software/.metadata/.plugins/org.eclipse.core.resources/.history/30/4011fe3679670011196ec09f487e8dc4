@@ -1,0 +1,34 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+
+#define FIFO            0x000
+#define REG_PAYLOAD_LEN 0x101
+#define REG_DATAV       0x108
+#define REG_CLEAR_DV    0x109
+#define IS_EMPTY        0x10A
+
+int read2(int addr){
+	printf("read ......\n");
+	fflush(stdout);
+    return *(int*) (RX_0_BASE + addr*4);
+
+}
+
+void delay2(int v){
+    while(v--);
+}
+
+int main(void) {
+    printf("=== MAVLink RX ===\n");
+
+    while (1) {
+    	delay2(100000);
+        printf("empty %d\n", read2(IS_EMPTY));
+        delay2(100000);
+        printf("fifo %d\n", read2(FIFO));
+        delay2(100000);
+        printf("len %d\n", read2(REG_PAYLOAD_LEN));
+        delay2(100000);
+    }
+}

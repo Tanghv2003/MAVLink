@@ -1,0 +1,106 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <unistd.h>
+#include "system.h"
+#include <io.h>         // BẮT BUỘC: Thư viện I/O của Nios II (Altera HAL)
+
+// Đảm bảo tên BASE ADDRESS khớp chính xác với định nghĩa trong system.h (được sinh ra từ Qsys)
+#define BASE     ((uintptr_t)RX_0_BASE)
+
+// Sử dụng IORD_32DIRECT để đọc bộ nhớ trực tiếp (Bypass Hardware Data Cache)
+// Tham số thứ 2 là byte offset, nên (o) << 2 là hoàn toàn chuẩn xác.
+#define RD(o)    IORD_32DIRECT(BASE, ((o) << 2))
+
+#define FIFO      0x000u
+#define IS_EMPTY  0x10Au
+
+// debug counter
+static uint32_t loop_cnt = 0;
+
+// ===============================
+// read register debug
+// ===============================
+static inline uint32_t rd_empty_raw()
+{
+    return RD(IS_EMPTY);
+}
+
+static inline uint8_t rd_fifo_raw()
+{
+    return (uint8_t)RD(FIFO);
+}
+
+// ===============================
+// check FIFO empty (with log)
+// ===============================
+bool fifo_is_empty(void)
+{
+    uint32_t val = rd_empty_raw();
+
+    // log nhẹ để không spam quá
+    if (loop_cnt % 50 == 0) {
+        printf("[DEBUG] IS_EMPTY raw = %u\n", val);
+        fflush(stdout); // Ép JTAG UART in ra ngay lập tức
+    }
+
+    return (val & 0x1);
+}
+
+// ===============================
+// read one byte (blocking + debug)
+// ===============================
+static uint8_t fifo_read(void)
+{
+    uint32_t wait_cnt = 0;
+
+    while (fifo_is_empty())
+    {
+        wait_cnt++;
+
+        if (wait_cnt % 100000 == 0) {
+            printf("[WAIT] FIFO still empty... cnt=%u\n", wait_cnt);
+            fflush(stdout);
+        }
+    }
+
+    uint8_t data = rd_fifo_raw();
+    printf("[READ] byte = 0x%02X\n", data);
+    fflush(stdout);
+
+    return data;
+}
+
+// ===============================
+// dump FIFO
+// ===============================
+void fifo_dump(void)
+{
+    printf("========== FIFO DUMP START ==========\n");
+    fflush(stdout);
+
+    uint32_t byte_cnt = 0;
+
+    while (!fifo_is_empty())
+    {
+        uint8_t b = fifo_read();
+        printf("[FIFO %02u] 0x%02X\n", byte_cnt, b);
+        fflush(stdout);
+        byte_cnt++;
+    }
+
+    printf("========== FIFO DUMP END (%u bytes) ==========\n", byte_cnt);
+    fflush(stdout);
+}
+
+// ===============================
+// main
+// ===============================
+int main(void)
+{
+    while(1){
+    	printf("hello");
+    }
+
+    return 0;
+}

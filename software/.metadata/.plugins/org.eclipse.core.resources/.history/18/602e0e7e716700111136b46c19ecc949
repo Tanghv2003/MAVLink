@@ -1,0 +1,64 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include "system.h"
+
+#define BASE     ((uintptr_t)RX_0_BASE)
+
+#define RD(o)    (*((volatile uint32_t *)(BASE + ((o) << 2))))
+
+#define FIFO      0x000u
+#define IS_EMPTY  0x10Au
+
+// ===============================
+// check FIFO empty
+// ===============================
+bool fifo_is_empty(void)
+{
+    return (RD(IS_EMPTY) & 0x1);
+}
+
+// ===============================
+// read one byte (blocking)
+// ===============================
+static uint8_t fifo_read(void)
+{
+    while (fifo_is_empty());   // wait until NOT empty
+    return (uint8_t)RD(FIFO);
+}
+
+// ===============================
+// read all FIFO content
+// ===============================
+void fifo_dump(void)
+{
+    printf("FIFO DATA: ");
+
+    while (!fifo_is_empty())
+    {
+        uint8_t b = fifo_read();
+        printf("%02X ", b);
+    }
+
+    printf("\n");
+}
+
+// ===============================
+// main loop
+// ===============================
+int main(void)
+{
+    printf("=== MAVLink RX FIFO Monitor ===\n");
+
+    while (1)
+    {
+        // nếu FIFO có data
+        if (!fifo_is_empty())
+        {
+            printf("FIFO NOT EMPTY -> READ FRAME\n");
+            fifo_dump();
+        }
+    }
+
+    return 0;
+}

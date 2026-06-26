@@ -1,0 +1,24 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+#include "led.h"
+#include "tx.h"
+#include "rx.h"
+
+void delay(int v){
+	while(v--);
+}
+
+void test_cpu(){
+	while(1){
+
+		delay(1000000);
+	}
+}
+int main(){
+	printf("abcd\n");
+	SetLed(12);
+	test_cpu();
+	//decode();
+	return 0;
+}

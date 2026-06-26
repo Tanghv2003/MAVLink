@@ -1,0 +1,17 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+#include "led.h"
+#include "tx.h"
+#include "rx.h"
+
+void delay(int v){
+	while(v--);
+}
+int main(){
+	SetLed(15);
+	printf("___________________________________________\n");
+	char p[] = "Hello\n";
+	decode();
+	return 0;
+}

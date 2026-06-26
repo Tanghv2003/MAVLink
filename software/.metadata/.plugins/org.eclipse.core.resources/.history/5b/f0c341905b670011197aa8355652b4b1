@@ -1,0 +1,89 @@
+#include <stdio.h>
+#include <stdint.h>
+
+#include "system.h"
+
+#define TX_BASE  TX_0_BASE
+#define RX_BASE  RX_0_BASE
+
+// Avalon MM register access
+#define REG_RD(base, offset) \
+    (*reinterpret_cast<volatile uint32_t*>((base) + ((offset) << 2)))
+
+#define REG_WR(base, offset, value) \
+    (*reinterpret_cast<volatile uint32_t*>((base) + ((offset) << 2)) = (value))
+
+// RX registers (word offsets)
+enum RX_REG : uint32_t {
+    RX_FIFO         = 0x000,
+    RX_PAYLOAD_LEN  = 0x101,
+    RX_INCOMPAT     = 0x102,
+    RX_COMPAT       = 0x103,
+    RX_SYS_ID       = 0x104,
+    RX_COMP_ID      = 0x105,
+    RX_MSG_ID       = 0x106,
+    RX_SEQ          = 0x107,
+    RX_DATA_VALID   = 0x108,
+    RX_CLEAR        = 0x109
+};
+
+static bool wait_data_valid(uint32_t timeout)
+{
+    while (timeout--) {
+        if (REG_RD(RX_BASE, RX_DATA_VALID) & 0x1)
+            return true;
+    }
+    return false;
+}
+
+static void print_header()
+{
+    printf("PASS: Frame received!\n");
+    printf("  payload_len  = %u\n", (uint8_t)REG_RD(RX_BASE, RX_PAYLOAD_LEN));
+    printf("  incompat     = 0x%02X\n", (uint8_t)REG_RD(RX_BASE, RX_INCOMPAT));
+    printf("  compat       = 0x%02X\n", (uint8_t)REG_RD(RX_BASE, RX_COMPAT));
+    printf("  sys_id       = %u\n", (uint8_t)REG_RD(RX_BASE, RX_SYS_ID));
+    printf("  comp_id      = %u\n", (uint8_t)REG_RD(RX_BASE, RX_COMP_ID));
+    printf("  msg_id       = 0x%06X\n", (uint32_t)REG_RD(RX_BASE, RX_MSG_ID) & 0xFFFFFF);
+    printf("  seq          = %u\n", (uint8_t)REG_RD(RX_BASE, RX_SEQ));
+}
+
+static void print_payload()
+{
+    uint32_t len = REG_RD(RX_BASE, RX_PAYLOAD_LEN) & 0xFF;
+
+    printf("  payload      = ");
+
+    for (uint32_t i = 0; i < len; i++) {
+        uint8_t byte = (uint8_t)REG_RD(RX_BASE, RX_FIFO);
+        printf("%02X ", byte);
+    }
+
+    printf("\n");
+}
+
+int main()
+{
+    printf("=== Loopback Test (C++ Version) ===\n");
+
+    // clear RX state
+    REG_WR(RX_BASE, RX_CLEAR, 1);
+
+    // TODO: TX send frame here
+    // REG_WR(TX_BASE, ...)
+
+    constexpr uint32_t TIMEOUT = 2000000;
+
+    if (!wait_data_valid(TIMEOUT)) {
+        printf("FAIL: Timeout, no frame received\n");
+        return -1;
+    }
+
+    print_header();
+    print_payload();
+
+    // clear for next packet
+    REG_WR(RX_BASE, RX_CLEAR, 1);
+
+    return 0;
+}

@@ -1,0 +1,63 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+#include "altera_avalon_jtag_uart_regs.h"
+
+#define RX    RX_0_BASE
+#define RD(o) (*((volatile uint32_t *)(RX + (o)*4)))
+
+// Delay don gian
+static void delay(int n) {
+    volatile int d = n;
+    while (d--);
+}
+
+int main(void) {
+    printf("MAVLink v2 RX Monitor\n");
+    printf("RX_BASE = 0x%08X\n", (int)RX_0_BASE);
+
+    // Flush dataValid neu con tu lan truoc
+    if (RD(0x108) & 1) {
+        printf("Flushing old dataValid...\n");
+        RD(0x108);
+        delay(1000);
+    }
+
+    printf("Waiting for frames...\n");
+
+    int n = 0;
+
+    while (1) {
+        // Them delay nho de giam tai CPU
+        delay(1000);
+
+        if (!(RD(0x108) & 1)) continue;
+
+        // Doc header
+        uint8_t  plen = (uint8_t)(RD(0x101) & 0xFF);
+        uint32_t mid  = RD(0x106) & 0xFFFFFF;
+        uint8_t  sys  = (uint8_t)(RD(0x104) & 0xFF);
+        uint8_t  seq  = (uint8_t)(RD(0x107) & 0xFF);
+
+        printf("\n-- Frame #%d  MSG=0x%06X  LEN=%d  SYS=%d  SEQ=%d\n",
+               ++n, (int)mid, plen, sys, seq);
+
+        // Doc payload
+        printf("Payload: ");
+        for (int i = 0; i < plen; i++) {
+            delay(60000);  // cho FIFO
+            printf("%02X ", (int)(RD(0x000) & 0xFF));
+        }
+        printf("\n");
+
+        // Clear dataValid
+        RD(0x108);
+
+        // Cho clear xong
+        delay(10000);
+
+        printf("Ready for next frame.\n");
+    }
+
+    return 0;
+}

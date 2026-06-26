@@ -1,0 +1,22 @@
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <unistd.h>
+#include "system.h"
+#include <io.h>         // BẮT BUỘC: Thư viện I/O của Nios II (Altera HAL)
+
+
+
+void delay(int v){
+
+	while(v--);
+}
+int main(void)
+{
+    while(1){
+    	printf("hello");
+    	delay(10000000);
+    }
+
+    return 0;
+}

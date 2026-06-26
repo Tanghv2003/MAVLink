@@ -1,0 +1,112 @@
+#include <stdio.h>
+#include "system.h"
+#include <stdint.h>
+#include <string.h>
+
+#define RX_BASE  RX_0_BASE
+
+#define RD(base, o)    (*((volatile uint32_t *)((base) + (o)*4)))
+#define WR(base, o, v) (*((volatile uint32_t *)((base) + (o)*4)) = (v))
+
+/* Register map (từ RTL) */
+#define REG_FIFO         0x000  /* payload bytes */
+#define REG_PAYLOAD_LEN  0x101
+#define REG_INCOMPAT     0x102
+#define REG_COMPAT       0x103
+#define REG_SYS_ID       0x104
+#define REG_COMP_ID      0x105
+#define REG_MSG_ID       0x106
+#define REG_SEQ          0x107
+#define REG_DATA_VALID   0x108  /* bit[0]=1 → frame sẵn sàng */
+#define REG_CLEAR_VALID  0x109  /* write bất kỳ → clear dataValid */
+#define REG_FIFO_EMPTY   0x10A  /* bit[0]=1 → FIFO rỗng */
+
+#define MAVLINK_MAX_PAYLOAD 255
+
+typedef struct {
+    uint8_t  seq;
+    uint8_t  sysid;
+    uint8_t  compid;
+    uint8_t  incompat_flags;
+    uint8_t  compat_flags;
+    uint32_t msgid;
+    uint8_t  payload_len;
+    uint8_t  payload[MAVLINK_MAX_PAYLOAD];
+} mavlink_frame_t;
+
+/* ------------------------------------------------------------------ */
+
+static inline int data_valid(void) {
+    return (RD(RX_BASE, REG_DATA_VALID) & 1);
+}
+
+static inline int fifo_empty(void) {
+    return (RD(RX_BASE, REG_FIFO_EMPTY) & 1);
+}
+
+static inline void clear_valid(void) {
+    WR(RX_BASE, REG_CLEAR_VALID, 1);
+}
+
+/* ------------------------------------------------------------------ */
+
+void read_frame(mavlink_frame_t *f) {
+    /* Đọc header từ thanh ghi — hardware đã parse sẵn */
+    f->payload_len   = (uint8_t)(RD(RX_BASE, REG_PAYLOAD_LEN) & 0xFF);
+    f->incompat_flags = (uint8_t)(RD(RX_BASE, REG_INCOMPAT)   & 0xFF);
+    f->compat_flags  = (uint8_t)(RD(RX_BASE, REG_COMPAT)      & 0xFF);
+    f->sysid         = (uint8_t)(RD(RX_BASE, REG_SYS_ID)      & 0xFF);
+    f->compid        = (uint8_t)(RD(RX_BASE, REG_COMP_ID)     & 0xFF);
+    f->msgid         = (uint32_t)(RD(RX_BASE, REG_MSG_ID)      & 0xFFFFFF);
+    f->seq           = (uint8_t)(RD(RX_BASE, REG_SEQ)         & 0xFF);
+
+    /* Đọc payload từ FIFO */
+    uint8_t len = f->payload_len;
+    if (len > MAVLINK_MAX_PAYLOAD) len = MAVLINK_MAX_PAYLOAD;
+
+    for (int i = 0; i < len; i++) {
+        while (fifo_empty());   /* chờ từng byte */
+        f->payload[i] = (uint8_t)(RD(RX_BASE, REG_FIFO) & 0xFF);
+    }
+
+    /* Clear dataValid để sẵn sàng nhận frame tiếp */
+    clear_valid();
+}
+
+void print_frame(const mavlink_frame_t *f, int count) {
+    printf("--- Frame #%d ---\n", count);
+    printf("  SEQ    : %d\n",      f->seq);
+    printf("  SYS_ID : %d\n",      f->sysid);
+    printf("  COMP_ID: %d\n",      f->compid);
+    printf("  MSG_ID : 0x%06X\n",  f->msgid);
+    printf("  LEN    : %d\n",      f->payload_len);
+    printf("  Payload:");
+    for (int i = 0; i < f->payload_len; i++) {
+        if (i % 16 == 0) printf("\n    ");
+        printf("%02X ", f->payload[i]);
+    }
+    printf("\n");
+}
+
+/* ------------------------------------------------------------------ */
+
+int main(void) {
+    printf("=== MAVLink v2 Decoder (Hardware-assisted) ===\n");
+
+    mavlink_frame_t frame;
+    int count = 0;
+
+    while (1) {
+        /* Dùng FIFO_EMPTY thay vì DATA_VALID */
+        if (fifo_empty()) continue;
+
+        memset(&frame, 0, sizeof(frame));
+        read_frame(&frame);
+
+        count++;
+        printf("[OK] Frame #%d\n", count);
+        print_frame(&frame, count);
+    }
+
+    return 0;
+}

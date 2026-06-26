@@ -1,0 +1,12 @@
+#include <stdio.h>
+#include "rx.h"
+
+void(int v){
+	while(v--);
+}
+int main(){
+	Frame frame;
+	while(1){
+
+	}
+}

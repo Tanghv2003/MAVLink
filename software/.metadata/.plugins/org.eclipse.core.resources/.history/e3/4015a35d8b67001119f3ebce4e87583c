@@ -1,0 +1,44 @@
+/*
+ * rx.c
+ *
+ *  Created on: Jun 14, 2026
+ *      Author: tangh
+ */
+#include "rx.h"
+
+int rx_read(int addr){
+	return *(int*) (RX_0_BASE + addr * 4);
+}
+
+void rx_write(int addr, int value){
+	*(int*)(RX_0_BASE + addr*4) = value;
+}
+
+int data_Valid(){
+	return rx_read(REG_DATA_VALID) & 0x01;
+}
+
+int fifo_Empty(){
+	return rx_read(REG_FIFO_EMPTY) & 0x01;
+}
+
+void clear(){
+	rx_write(REG_CLEAR_VALID, 0x01);
+}
+
+void readFrame(Frame frame ){
+	if(!fifo_Empty && data_Valid()){
+		int stx = rx_read(REG_FIFO);
+		int len = rx_read(REG_FIFO);
+		char* buf[12 + len];// header 10 + crc 2
+
+		for(int i = 0; i <= 12 + len ; i++){
+			buf[i] = rx_read(REG_FIFO);
+		}
+
+		frame->stx = stx;
+
+
+
+	}
+}

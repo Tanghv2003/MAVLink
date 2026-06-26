@@ -1,0 +1,38 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+
+#define RX    RX_0_BASE
+#define RD(o) (*((volatile uint32_t *)(RX + (o)*4)))
+
+int main(void) {
+    printf("MAVLink v2 RX Monitor\n");
+
+    int n = 0;
+
+    while (1) {
+        // Poll dataValid
+        if (!(RD(0x108) & 1)) continue;
+
+        uint8_t  plen = RD(0x101);
+        uint32_t mid  = RD(0x106) & 0xFFFFFF;
+
+        printf("\n-- Frame #%d  MSG=0x%06X  LEN=%d  SYS=%d  SEQ=%d\n",
+               ++n, (int)mid, plen,
+               (int)(RD(0x104) & 0xFF),
+               (int)(RD(0x107) & 0xFF));
+
+        printf("Payload: ");
+        for (int i = 0; i < plen; i++) {
+            volatile int d = 60000; while (d--);
+            printf("%02X ", (int)(RD(0x000) & 0xFF));
+        }
+        printf("\n");
+
+        // Clear dataValid
+        RD(0x108);
+
+        // Cho 1 clock de latch reset xong
+        volatile int w = 100; while (w--);
+    }
+}

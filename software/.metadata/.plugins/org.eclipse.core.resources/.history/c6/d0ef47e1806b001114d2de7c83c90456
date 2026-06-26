@@ -1,0 +1,13 @@
+#include <stdio.h>
+#include "rx.h"
+
+void delay(int v){
+	while(v--);
+}
+int main(){
+	Frame frame;
+	while(1){
+		readFrame(&frame);
+		delay(10000);
+	}
+}

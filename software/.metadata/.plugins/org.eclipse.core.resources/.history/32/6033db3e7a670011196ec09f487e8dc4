@@ -1,0 +1,38 @@
+#include <stdio.h>
+#include "system.h"
+#include <stdint.h>
+#define TX_BASE  TX_0_BASE
+#define RX_BASE  RX_0_BASE
+#define RD(base, o)   (*((volatile uint32_t *)((base) + (o)*4)))
+#define WR(base, o,v) (*((volatile uint32_t *)((base) + (o)*4)) = (v))
+
+int main(void) {
+    printf("=== Loopback Test ===\n");
+
+
+
+    int timeout = 1000000;
+//    while (!(RD(RX_BASE, 0x108) & 1) && timeout--);
+//
+//    if (timeout <= 0) {
+//        printf("FAIL: Timeout, no frame received\n");
+//    } else {
+//        printf("PASS: Frame received!\n");
+//        printf("payload_len = %d\n", (int)(RD(RX_BASE, 0x101) & 0xFF));
+//        printf("sys_id      = %d\n", (int)(RD(RX_BASE, 0x104) & 0xFF));
+//        printf("msg_id      = 0x%06X\n", (int)(RD(RX_BASE, 0x106) & 0xFFFFFF));
+//        WR(RX_BASE, 0x109, 1);
+//    }
+    if((RD(RX_BASE, 0x108) & 1){
+    	for(int i = 0; i <= 1000; i ++ ){
+    		printf("1\n");
+    	}
+
+    }else{
+    	for(int i = 0; i <= 1000; i ++ ){
+    	    		printf("0\n");
+    	    	}
+    }
+
+    return 0;
+}

@@ -1,0 +1,8 @@
+#include "tx.h"
+
+bool wait_done(){
+	return (*(int*) ADDR_BUSY_REG ) && 0x01;
+}
+
+
+

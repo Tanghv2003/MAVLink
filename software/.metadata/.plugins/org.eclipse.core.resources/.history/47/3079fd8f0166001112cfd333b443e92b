@@ -1,0 +1,67 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+
+#define RX_BASE  RX_0_BASE
+#define RD(offset)  (*((volatile uint32_t *)(RX_BASE + (offset) * 4)))
+#define WR(offset, val) (*((volatile uint32_t *)(RX_BASE + (offset) * 4)) = (val))
+
+static void delay(int n) {
+    volatile int d = n;
+    while (d--);
+}
+
+int main(void) {
+    printf("MAVLink v2 RX Monitor\n");
+    printf("RX_BASE = 0x%08X\n", (int)RX_BASE);
+
+    // Flush neu con dataValid cu tu lan truoc
+    if (RD(0x108) & 1) {
+        printf("Flushing old dataValid...\n");
+        WR(0x109, 1);
+        delay(1000);
+    }
+
+    printf("Waiting for frames...\n");
+    int n = 0;
+
+    while (1) {
+        delay(1000);
+
+        if (!(RD(0x108) & 1)) continue;
+
+        // Doc header
+        uint8_t  plen = (uint8_t) (RD(0x101) & 0xFF);
+        uint8_t  inc  = (uint8_t) (RD(0x102) & 0xFF);
+        uint8_t  cmp  = (uint8_t) (RD(0x103) & 0xFF);
+        uint8_t  sys  = (uint8_t) (RD(0x104) & 0xFF);
+        uint8_t  comp = (uint8_t) (RD(0x105) & 0xFF);
+        uint32_t mid  = (uint32_t)(RD(0x106) & 0xFFFFFF);
+        uint8_t  seq  = (uint8_t) (RD(0x107) & 0xFF);
+
+        printf("\n-- Frame #%d\n", ++n);
+        printf("   MSG_ID  = 0x%06X\n", mid);
+        printf("   LEN     = %d\n",     plen);
+        printf("   SYS_ID  = %d\n",     sys);
+        printf("   COMP_ID = %d\n",     comp);
+        printf("   INC_FLAG= 0x%02X\n", inc);
+        printf("   CMP_FLAG= 0x%02X\n", cmp);
+        printf("   SEQ     = %d\n",     seq);
+
+        // Doc payload tu FIFO
+        printf("   Payload : ");
+        for (int i = 0; i < plen; i++) {
+            delay(60000);   // cho FIFO pop xong
+            printf("%02X ", (int)(RD(0x000) & 0xFF));
+        }
+        printf("\n");
+
+        // Bao hieu da xu ly xong -> clear dataValid
+        WR(0x109, 1);
+        delay(1000);
+
+        printf("Ready for next frame.\n");
+    }
+
+    return 0;
+}

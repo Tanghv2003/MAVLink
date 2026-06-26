@@ -1,0 +1,15 @@
+#pragma once
+#include "system.h"
+#include <stdbool.h>
+#include <string.h>
+
+#define ADDR_FIFO_REG 0x00
+#define ADDR_PAYLOAD_LEN 0x01*4
+#define ADDR_INC_FLAG 0x01
+#define ADDR_CMP_FLAG 0x01
+#define ADDR_PAYLOAD_LEN 0x01
+#define ADDR_PAYLOAD_LEN 0x01
+#define ADDR_PAYLOAD_LEN 0x01
+#define ADDR_PAYLOAD_LEN 0x01
+
+

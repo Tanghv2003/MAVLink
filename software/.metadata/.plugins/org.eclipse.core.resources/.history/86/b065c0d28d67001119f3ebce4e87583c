@@ -1,0 +1,78 @@
+/*
+ * rx.c
+ *
+ *  Created on: Jun 14, 2026
+ *      Author: tangh
+ */
+#include "rx.h"
+
+int rx_read(int addr){
+	return *(int*) (RX_0_BASE + addr * 4);
+}
+
+void rx_write(int addr, int value){
+	*(int*)(RX_0_BASE + addr*4) = value;
+}
+
+int data_Valid(){
+	return rx_read(REG_DATA_VALID) & 0x01;
+}
+
+int fifo_Empty(){
+	return rx_read(REG_FIFO_EMPTY) & 0x01;
+}
+
+void clear(){
+	rx_write(REG_CLEAR_VALID, 0x01);
+}
+
+void readFrame(Frame* frame ){
+	if(!fifo_Empty() && data_Valid()){
+		int stx = rx_read(REG_FIFO) & 0xff;
+		int len = rx_read(REG_FIFO) & 0xff;
+		char* buf[10 + len];// header 10 + crc 2
+		memset(buf, 0, sizeof(buf));
+
+
+		for(int i = 0; i < 10 + len ; i++){
+			buf[i] = rx_read(REG_FIFO) & 0xff;
+		}
+
+		frame->stx = stx;
+		frame->len = len;
+		frame-> inc_flag = buf[0];
+		frame->cmp_flag = buf[1];
+		frame->seq = buf[2];
+		frame->sys_ID = buf[3];
+		frame->comp_ID = buf[4];
+		frame->msg_ID = buf[5] | (buf[6] << 8) | (buf[7] << 9);
+		for(int i = 0; i <len; i ++){
+			frame->payload[i] = buf[8 + i];
+		}
+		int crc0 = buf[8 + len];
+		int crc1 = buf[9 + len];
+
+		clear();
+
+
+
+	}
+}
+
+
+void printFrame(Frame frame){
+
+	    printf("  STX     : 0x%02X\n", frame->stx);
+	    printf("  SEQ     : %d\n",     frame->seq);
+	    printf("  SYS_ID  : %d\n",     frame->sys_ID);
+	    printf("  COMP_ID : %d\n",     frame->comp_ID);
+	    printf("  MSG_ID  : 0x%06X\n", frame->msg_ID);
+	    printf("  LEN     : %d\n",     frame->len);
+	    printf("  CRC     : 0x%04X\n", frame->crc);
+	    printf("  Payload :");
+	    for (int i = 0; i < frame->len; i++) {
+	        if (i % 16 == 0) printf("\n    ");
+	        printf("%02X ", frame->payload[i]);
+	    }
+	    printf("\n");
+}

@@ -1,0 +1,241 @@
+#include <stdio.h>
+#include <string.h>
+#include "system.h"
+
+/* ═══════════════════════════════════════════════════════
+ *  REGISTER MAP
+ * ═══════════════════════════════════════════════════════ */
+#define REG_FIFO            0x000
+#define REG_PAYLOAD_LEN     0x101
+#define REG_INC_FLAG        0x102
+#define REG_CMP_FLAG        0x103
+#define REG_SYS_ID          0x104
+#define REG_COMP_ID         0x105
+#define REG_MSG_ID          0x106
+#define REG_SEQ             0x107
+#define REG_BUSY            0x108
+#define REG_CLEAR_VALID     0x109
+#define REG_FIFO_EMPTY      0x10A
+#define REG_FIFO_FULL       0x10B
+#define REG_DB_STATE        0x10C
+#define REG_DB_UART_STATE   0x10D
+
+/* ═══════════════════════════════════════════════════════
+ *  TYPES
+ * ═══════════════════════════════════════════════════════ */
+typedef struct {
+    int  stx;
+    int  len;
+    int  inc_flag;
+    int  cmp_flag;
+    int  seq;
+    int  sys_ID;
+    int  comp_ID;
+    int  msg_ID;
+    char payload[255];
+} Frame;
+
+/* ═══════════════════════════════════════════════════════
+ *  HARDWARE ACCESS
+ * ═══════════════════════════════════════════════════════ */
+int rx_read(int addr) {
+    return *(volatile int*)(RX_0_BASE + addr * 4);
+}
+
+void rx_write(int addr, int value) {
+    *(volatile int*)(RX_0_BASE + addr * 4) = value;
+}
+
+/* ═══════════════════════════════════════════════════════
+ *  STATUS HELPERS
+ * ═══════════════════════════════════════════════════════ */
+int rx_busy()    { return rx_read(REG_BUSY)       & 0x01; }
+int fifo_Empty() { return rx_read(REG_FIFO_EMPTY) & 0x01; }
+int fifo_Full()  { return rx_read(REG_FIFO_FULL)  & 0x01; }
+void clear()     { rx_write(REG_CLEAR_VALID, 0x01); }
+
+/* ═══════════════════════════════════════════════════════
+ *  DEBUG HELPERS
+ * ═══════════════════════════════════════════════════════ */
+const char* decode_ml_state(int s) {
+    switch (s) {
+        case  0: return "idle        ";
+        case  2: return "len         ";
+        case  3: return "inc_flag    ";
+        case  4: return "cmp_flag    ";
+        case  5: return "seq         ";
+        case  6: return "sys_id      ";
+        case  7: return "comp_id     ";
+        case  8: return "msg_id_1    ";
+        case  9: return "msg_id_2    ";
+        case 10: return "msg_id_3    ";
+        case 11: return "payload     ";
+        case 17: return "payload_wait";
+        case 15: return "crc_extra   ";
+        case 16: return "crc_wait    ";
+        case 12: return "crc_0       ";
+        case 13: return "crc_1       ";
+        case 18: return "fifo        ";
+        case 14: return "done        ";
+        default: return "???         ";
+    }
+}
+
+const char* decode_uart_state(int s) {
+    switch (s) {
+        case 0: return "idle ";
+        case 1: return "start";
+        case 2: return "data ";
+        case 3: return "stop ";
+        default: return "???  ";
+    }
+}
+
+void print_hw_state(const char* tag) {
+    int ml   = rx_read(REG_DB_STATE)      & 0x1F;
+    int uart = rx_read(REG_DB_UART_STATE) & 0x03;
+    int plen = rx_read(REG_PAYLOAD_LEN)   & 0xFF;
+    int mid  = rx_read(REG_MSG_ID)        & 0xFFFFFF;
+
+    printf("[%s]\n", tag ? tag : "HW");
+    printf("  mavlink : %2d %-12s | uart: %d %s\n",
+           ml, decode_ml_state(ml), uart, decode_uart_state(uart));
+    printf("  busy:%d  empty:%d  full:%d\n",
+           rx_busy(), fifo_Empty(), fifo_Full());
+    printf("  payload_len:%-3d  msg_id:0x%06X\n", plen, mid);
+}
+
+void debug_stuck(int iterations) {
+    int prev = -1, same = 0;
+    printf("[debug_stuck] polling %d times...\n", iterations);
+
+    for (int i = 0; i < iterations; i++) {
+        int ml   = rx_read(REG_DB_STATE)      & 0x1F;
+        int uart = rx_read(REG_DB_UART_STATE) & 0x03;
+
+        printf("  #%02d | ml:%2d %-12s | uart:%d %s | busy:%d full:%d empty:%d\n",
+               i, ml, decode_ml_state(ml),
+               uart, decode_uart_state(uart),
+               rx_busy(), fifo_Full(), fifo_Empty());
+
+        if (ml == prev) {
+            if (++same >= 4) {
+                printf("  --> STUCK: [%d] %s\n", ml, decode_ml_state(ml));
+                if      (ml == 18 && fifo_Full())
+                    printf("      fifo state + full=1 -> sync_fifo bao full sai\n");
+                else if (ml == 11)
+                    printf("      payload state -> mat byte UART\n");
+                else if (ml == 12 || ml == 13)
+                    printf("      crc state -> frame bi cat, thieu byte CRC\n");
+                else if (ml == 0 && rx_busy())
+                    printf("      idle nhung busy=1 -> logic busy sai\n");
+                break;
+            }
+        } else {
+            same = 0;
+            prev = ml;
+        }
+        for (volatile int d = 0; d < 50000; d++);
+    }
+    printf("[debug_stuck] done\n");
+}
+
+/* ═══════════════════════════════════════════════════════
+ *  FRAME API
+ * ═══════════════════════════════════════════════════════ */
+void flushFifo() {
+    while (!fifo_Empty())
+        rx_read(REG_FIFO);
+    clear();
+}
+
+void printFrame(Frame* f) {
+    if (f->msg_ID == 253) {
+        for (int i = 1; i < f->len; i++)
+            printf("%c", (char)f->payload[i]);
+        printf("  LEN     : %d\n", f->len);
+        printf("\n");
+    } else {
+        printf("\n  STX     : 0x%02X\n", f->stx);
+        printf("  SEQ     : %d\n",       f->seq);
+        printf("  SYS_ID  : %d\n",       f->sys_ID);
+        printf("  COMP_ID : %d\n",       f->comp_ID);
+        printf("  MSG_ID  : 0x%06X\n",   f->msg_ID);
+        printf("  LEN     : %d\n",       f->len);
+        printf("  Payload :");
+        for (int i = 0; i < f->len; i++)
+            printf(" %02X", (unsigned char)f->payload[i]);
+        printf("\n");
+    }
+}
+
+void readFrame(Frame* f) {
+    if (!fifo_Empty()) {
+        int stx = rx_read(REG_FIFO) & 0xFF;
+        int len = rx_read(REG_FIFO) & 0xFF;
+
+        /* sanity check */
+        if (stx != 0xFD) {
+            printf("[readFrame] STX sai: 0x%02X -> flush FIFO\n", stx);
+            flushFifo();
+            return;
+        }
+
+        unsigned char buf[10 + len];
+        memset(buf, 0, sizeof(buf));
+        for (int i = 0; i < 10 + len; i++)
+            buf[i] = rx_read(REG_FIFO) & 0xFF;
+
+        f->stx     = stx;
+        f->len     = len;
+        f->inc_flag = buf[0];
+        f->cmp_flag = buf[1];
+        f->seq     = buf[2];
+        f->sys_ID  = buf[3];
+        f->comp_ID = buf[4];
+        f->msg_ID  = buf[5] | (buf[6] << 8) | (buf[7] << 16);
+        for (int i = 0; i < len; i++)
+            f->payload[i] = buf[8 + i];
+
+        printFrame(f);
+        clear();
+
+    } else {
+        /* FIFO rong: in trang thai de debug */
+        int ml   = rx_read(REG_DB_STATE)      & 0x1F;
+        int uart = rx_read(REG_DB_UART_STATE) & 0x03;
+        printf("empty:1 busy:%d full:%d | ml:%2d %-12s | uart:%d %s\n",
+               rx_busy(), fifo_Full(),
+               ml, decode_ml_state(ml),
+               uart, decode_uart_state(uart));
+    }
+}
+
+/* ═══════════════════════════════════════════════════════
+ *  MAIN
+ * ═══════════════════════════════════════════════════════ */
+int main() {
+    printf("=== BOOT ===\n");
+    print_hw_state("BOOT");
+
+    Frame f;
+    int idle_cnt = 0;
+
+    while (1) {
+        if (!fifo_Empty()) {
+            idle_cnt = 0;
+            memset(&f, 0, sizeof(f));
+            readFrame(&f);
+        } else {
+            idle_cnt++;
+            if (idle_cnt > 2000000) {
+                idle_cnt = 0;
+                print_hw_state("TIMEOUT");
+                if (rx_busy() || fifo_Full())
+                    debug_stuck(10);
+            }
+        }
+    }
+
+    return 0;
+}

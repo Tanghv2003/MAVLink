@@ -1,0 +1,59 @@
+#include "rx.h"
+#include <stdio.h>
+
+int read(int addr){
+	 return *(int *)(RX_0_BASE + addr);
+}
+
+bool has_frame(){
+	bool rs = read(ADDR_DATA_VALID) & 0x01;
+	return rs;
+}
+
+void decode(){
+	while(1){
+		while(!has_frame());
+		int payload_len = read(ADDR_PAYLOAD_LEN);
+		int sys_id      = read(ADDR_SYS_ID) & 0x01;
+		int comp_id     = read(ADDR_COMP_ID);
+		int msg_id      = read(ADDR_MSGID);
+		int seq         = read(ADDR_SEQ);
+
+		switch(msg_id){
+			case 0:{
+				int type        = read(ADDR_FIFO_REG);
+				int autopilot   = read(ADDR_FIFO_REG);
+				int base_mode   = read(ADDR_FIFO_REG);
+				int custom_mode = read(ADDR_FIFO_REG);
+
+				printf("heartbeat:\n");
+				printf("type=%d ", type);
+				printf("autopilot=%d ", autopilot);
+				printf("base_mode=%d ", base_mode);
+				printf("custom_mode=%d\n", custom_mode);
+				break;
+			}
+			case 253:{
+				int security = read(ADDR_FIFO_REG);
+
+				printf("security: %d\n", security);
+
+				for(int i = 1; i < payload_len; i++){
+				        char c = (char)read(ADDR_FIFO_REG);
+				        printf("%c", c);
+				    }
+
+				printf("\n");
+				break;
+			}
+			default:{
+				for(int i = 0; i < payload_len; i++)
+				  {
+				    read(ADDR_FIFO_REG);
+				  }
+			}
+		}
+	}
+}
+
+

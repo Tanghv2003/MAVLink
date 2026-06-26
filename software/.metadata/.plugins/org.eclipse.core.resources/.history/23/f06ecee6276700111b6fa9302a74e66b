@@ -1,0 +1,17 @@
+#include "rx.h"
+
+int read(int addr){
+	 return *(int *)(RX_0_BASE + addr);
+}
+
+void is_done(){
+	bool rs = read(ADDR_DATA_VALID);
+	return rs;
+}
+
+void decode(){
+	while(is_done);
+
+}
+
+

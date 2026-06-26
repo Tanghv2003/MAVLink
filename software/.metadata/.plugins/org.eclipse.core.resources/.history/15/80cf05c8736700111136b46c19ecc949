@@ -1,0 +1,35 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+
+#define BASE        ((uintptr_t)RX_0_BASE)
+#define RD(o)       (*((volatile uint32_t *)(BASE + ((o) << 2))))
+#define WR(o,v)     (*((volatile uint32_t *)(BASE + ((o) << 2))) = (v))
+
+/* Địa chỉ thanh ghi */
+#define FIFO            0x000u
+#define REG_PAYLOAD_LEN 0x101u
+#define REG_DATAV       0x108u
+#define REG_CLEAR_DV    0x109u
+#define IS_EMPTY        0x10Au
+
+static int fifo_is_empty(void) {
+    return (int) (RD(IS_EMPTY) & 1);
+}
+
+static uint8_t fifo_read(void) {
+    while (!fifo_is_empty());        // chờ có dữ liệu
+    return (uint8_t)RD(FIFO);
+}
+void delay2(int v){
+	while(v--);
+}
+int main(void) {
+    printf("=== MAVLink RX ===\n");
+
+    while (1) {
+    	printf("%d\n", fifo_read());
+    	delay2(10000000);
+
+    }
+}

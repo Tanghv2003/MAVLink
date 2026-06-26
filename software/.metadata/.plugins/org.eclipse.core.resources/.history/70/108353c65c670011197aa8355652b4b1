@@ -1,0 +1,141 @@
+#include <stdio.h>
+#include <stdint.h>
+
+#include "system.h"
+
+#define TX_BASE  TX_0_BASE
+#define RX_BASE  RX_0_BASE
+
+// ===============================
+// Avalon MM register access (C ONLY)
+// ===============================
+#define REG_RD(base, offset) \
+    (*((volatile uint32_t *)((base) + ((offset) << 2))))
+
+#define REG_WR(base, offset, value) \
+    (*((volatile uint32_t *)((base) + ((offset) << 2))) = (value))
+
+// ===============================
+// RX register map (word offsets)
+// ===============================
+#define RX_FIFO         0x000
+#define RX_PAYLOAD_LEN  0x101
+#define RX_INCOMPAT     0x102
+#define RX_COMPAT       0x103
+#define RX_SYS_ID       0x104
+#define RX_COMP_ID      0x105
+#define RX_MSG_ID       0x106
+#define RX_SEQ          0x107
+#define RX_DATA_VALID   0x108
+#define RX_CLEAR        0x109
+
+// ===============================
+// wait helper
+// ===============================
+int wait_data_valid(uint32_t timeout)
+{
+    while (timeout--) {
+        if (REG_RD(RX_BASE, RX_DATA_VALID) & 0x1)
+            return 1;
+    }
+    return 0;
+}
+
+// ===============================
+// print header
+// ===============================
+void print_header()
+{
+    printf("PASS: Frame received!\n");
+
+    printf("  payload_len  = %u\n",
+        (uint8_t)REG_RD(RX_BASE, RX_PAYLOAD_LEN));
+
+    printf("  incompat     = 0x%02X\n",
+        (uint8_t)REG_RD(RX_BASE, RX_INCOMPAT));
+
+    printf("  compat       = 0x%02X\n",
+        (uint8_t)REG_RD(RX_BASE, RX_COMPAT));
+
+    printf("  sys_id       = %u\n",
+        (uint8_t)REG_RD(RX_BASE, RX_SYS_ID));
+
+    printf("  comp_id      = %u\n",
+        (uint8_t)REG_RD(RX_BASE, RX_COMP_ID));
+
+    printf("  msg_id       = 0x%06X\n",
+        (unsigned int)(REG_RD(RX_BASE, RX_MSG_ID) & 0xFFFFFF));
+
+    printf("  seq          = %u\n",
+        (uint8_t)REG_RD(RX_BASE, RX_SEQ));
+}
+
+// ===============================
+// print payload FIFO
+// ===============================
+void print_payload()
+{
+    uint32_t len = REG_RD(RX_BASE, RX_PAYLOAD_LEN) & 0xFF;
+
+    printf("  payload      = ");
+
+    for (uint32_t i = 0; i < len; i++) {
+        uint8_t byte = (uint8_t)REG_RD(RX_BASE, RX_FIFO);
+        printf("%02X ", byte);
+    }
+
+    printf("\n");
+}
+
+// ===============================
+// main
+// ===============================
+int main(void)
+{
+    printf("=== MAVLink Continuous RX ===\n");
+
+    // clear RX state
+    REG_WR(RX_BASE, RX_CLEAR, 1);
+
+    while (1)
+    {
+        uint32_t timeout = 2000000;
+
+        // =========================
+        // WAIT FOR FRAME
+        // =========================
+        while (timeout--)
+        {
+            if (REG_RD(RX_BASE, RX_DATA_VALID) & 0x1)
+            {
+                break;
+            }
+        }
+
+        if (timeout == 0)
+        {
+            printf("WARN: Timeout, no frame\n");
+
+            // debug nhẹ
+            printf("RX_DATA_VALID = 0x%08X\n",
+                   (unsigned int)REG_RD(RX_BASE, RX_DATA_VALID));
+
+            continue; // quay lại chờ frame tiếp theo
+        }
+
+        // =========================
+        // PROCESS FRAME
+        // =========================
+        print_header();
+        print_payload();
+
+        // =========================
+        // CLEAR FOR NEXT FRAME
+        // =========================
+        REG_WR(RX_BASE, RX_CLEAR, 1);
+
+        printf("------------------------\n");
+    }
+
+    return 0;
+}

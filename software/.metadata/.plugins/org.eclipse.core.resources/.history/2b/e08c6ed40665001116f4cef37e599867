@@ -1,0 +1,20 @@
+#include "sys/alt_stdio.h"
+
+int main() {
+    alt_putstr("JTAG UART Demo\n");
+    alt_putstr("Nios II is running!\n");
+
+    while (1) {
+        alt_putstr("Hello from FPGA!\n");
+
+        volatile int i;
+        for (i = 0; i < 2000000; i++);
+
+        int c = alt_getchar();
+        if (c != -1) {
+            alt_putchar((char)c);
+        }
+    }
+
+    return 0;
+}

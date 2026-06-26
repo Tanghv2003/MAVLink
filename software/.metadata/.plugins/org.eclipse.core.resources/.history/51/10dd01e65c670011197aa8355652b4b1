@@ -1,0 +1,161 @@
+#include <cstdio>
+#include <cstdint>
+#include "system.h"
+
+// ===============================
+// Base addresses
+// ===============================
+#define TX_BASE  TX_0_BASE
+#define RX_BASE  RX_0_BASE
+
+// ===============================
+// Avalon MM register access
+// ===============================
+static inline uint32_t reg_rd(uint32_t base, uint32_t offset) {
+    return *reinterpret_cast<volatile uint32_t*>(base + (offset << 2));
+}
+static inline void reg_wr(uint32_t base, uint32_t offset, uint32_t value) {
+    *reinterpret_cast<volatile uint32_t*>(base + (offset << 2)) = value;
+}
+
+// ===============================
+// RX register map (word offsets)
+// ===============================
+static constexpr uint32_t RX_FIFO        = 0x000;
+static constexpr uint32_t RX_PAYLOAD_LEN = 0x101;
+static constexpr uint32_t RX_INCOMPAT    = 0x102;
+static constexpr uint32_t RX_COMPAT      = 0x103;
+static constexpr uint32_t RX_SYS_ID      = 0x104;
+static constexpr uint32_t RX_COMP_ID     = 0x105;
+static constexpr uint32_t RX_MSG_ID      = 0x106;
+static constexpr uint32_t RX_SEQ         = 0x107;
+static constexpr uint32_t RX_DATA_VALID  = 0x108;
+static constexpr uint32_t RX_CLEAR       = 0x109;
+
+static constexpr uint32_t TIMEOUT_CYCLES = 2000000u;
+
+// ===============================
+// MAVLink frame struct
+// ===============================
+struct MavlinkFrame {
+    uint8_t  payload_len;
+    uint8_t  incompat_flags;
+    uint8_t  compat_flags;
+    uint8_t  sys_id;
+    uint8_t  comp_id;
+    uint32_t msg_id;      // 24-bit
+    uint8_t  seq;
+    uint8_t  payload[255];
+};
+
+// ===============================
+// Wait for data_valid (true timeout)
+// ===============================
+static bool wait_data_valid(uint32_t timeout_cycles) {
+    for (uint32_t i = 0; i < timeout_cycles; ++i) {
+        if (reg_rd(RX_BASE, RX_DATA_VALID) & 0x1u)
+            return true;
+    }
+    return false;
+}
+
+// ===============================
+// Read header registers
+// ===============================
+static void read_header(MavlinkFrame& f) {
+    f.payload_len   = static_cast<uint8_t>(reg_rd(RX_BASE, RX_PAYLOAD_LEN));
+    f.incompat_flags= static_cast<uint8_t>(reg_rd(RX_BASE, RX_INCOMPAT));
+    f.compat_flags  = static_cast<uint8_t>(reg_rd(RX_BASE, RX_COMPAT));
+    f.sys_id        = static_cast<uint8_t>(reg_rd(RX_BASE, RX_SYS_ID));
+    f.comp_id       = static_cast<uint8_t>(reg_rd(RX_BASE, RX_COMP_ID));
+    f.msg_id        = reg_rd(RX_BASE, RX_MSG_ID) & 0x00FFFFFFu;
+    f.seq           = static_cast<uint8_t>(reg_rd(RX_BASE, RX_SEQ));
+}
+
+// ===============================
+// Read payload from FIFO
+// QUAN TRỌNG: phải đọc đúng số byte,
+// mỗi lần đọc hardware mới pop 1 byte ra FIFO
+// ===============================
+static void read_payload(MavlinkFrame& f) {
+    uint32_t len = f.payload_len;
+    if (len > 255u) len = 255u;          // safety clamp
+
+    for (uint32_t i = 0; i < len; ++i) {
+        // Mỗi lần đọc địa chỉ FIFO → hardware pop 1 byte
+        // flag_rdone đảm bảo mỗi lần read chỉ pop 1 lần
+        f.payload[i] = static_cast<uint8_t>(reg_rd(RX_BASE, RX_FIFO));
+    }
+}
+
+// ===============================
+// Print frame
+// ===============================
+static void print_frame(const MavlinkFrame& f) {
+    printf("=== MAVLink Frame Received ===\n");
+    printf("  seq          = %u\n",   f.seq);
+    printf("  sys_id       = %u\n",   f.sys_id);
+    printf("  comp_id      = %u\n",   f.comp_id);
+    printf("  msg_id       = 0x%06X\n", static_cast<unsigned>(f.msg_id));
+    printf("  payload_len  = %u\n",   f.payload_len);
+    printf("  incompat     = 0x%02X\n", f.incompat_flags);
+    printf("  compat       = 0x%02X\n", f.compat_flags);
+    printf("  payload      = ");
+    for (uint8_t i = 0; i < f.payload_len; ++i)
+        printf("%02X ", f.payload[i]);
+    printf("\n");
+    printf("------------------------------\n");
+}
+
+// ===============================
+// Clear RX và chờ hardware sẵn sàng
+// QUAN TRỌNG: phải clear TRƯỚC KHI đọc header
+// để tránh đọc frame cũ lại
+// ===============================
+static void clear_and_wait_ready() {
+    reg_wr(RX_BASE, RX_CLEAR, 1u);
+
+    // Đợi data_valid về 0 (hardware đã nhận lệnh clear)
+    for (uint32_t i = 0; i < 1000u; ++i) {
+        if (!(reg_rd(RX_BASE, RX_DATA_VALID) & 0x1u))
+            break;
+    }
+}
+
+// ===============================
+// main
+// ===============================
+int main(void)
+{
+    printf("=== MAVLink Continuous RX (C++) ===\n");
+
+    // Reset trạng thái ban đầu
+    clear_and_wait_ready();
+
+    while (true)
+    {
+        // ── 1. Chờ frame mới ──────────────────────────────
+        if (!wait_data_valid(TIMEOUT_CYCLES)) {
+            printf("WARN: Timeout – no frame received\n");
+            printf("      RX_DATA_VALID = 0x%08X\n",
+                   static_cast<unsigned>(reg_rd(RX_BASE, RX_DATA_VALID)));
+            continue;
+        }
+
+        // ── 2. Đọc header (register, không phụ thuộc FIFO) ─
+        MavlinkFrame frame{};
+        read_header(frame);
+
+        // ── 3. Đọc payload từ FIFO ────────────────────────
+        //    Phải đọc TRƯỚC KHI clear để FIFO không bị reset
+        read_payload(frame);
+
+        // ── 4. In frame ra ────────────────────────────────
+        print_frame(frame);
+
+        // ── 5. Clear để nhận frame tiếp theo ─────────────
+        clear_and_wait_ready();
+    }
+
+    return 0;
+}

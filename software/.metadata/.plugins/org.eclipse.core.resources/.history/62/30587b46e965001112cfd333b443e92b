@@ -1,0 +1,209 @@
+#include <stdio.h>
+#include <stdint.h>
+#include "system.h"
+
+#define RX_BASE   RX_0_BASE
+
+static inline uint32_t av_read(uint32_t base, uint32_t off) {
+    return *((volatile uint32_t *)(base + off));
+}
+
+// ── Poll dataValid ────────────────────────────────────────
+static int wait_packet(void) {
+    while (1) {
+        if (av_read(RX_BASE, 0x108 * 4) & 0x1)
+            return 1;
+    }
+}
+
+// ── Doc 1 byte tu FIFO, cho den khi co data ──────────────
+static uint8_t fifo_read_byte(void) {
+    // Poll isEmpty (address 0x109)
+    int timeout = 2000000;
+    while ((av_read(RX_BASE, 0x109 * 4) & 0x1) && timeout--)
+        ;
+    return (uint8_t)(av_read(RX_BASE, 0x000) & 0xFF);
+}
+
+// ── Doc header registers ──────────────────────────────────
+typedef struct {
+    uint8_t  plen;
+    uint8_t  incompat;
+    uint8_t  compat;
+    uint8_t  sys_id;
+    uint8_t  comp_id;
+    uint32_t msg_id;
+    uint8_t  seq;
+} mavlink_header_t;
+
+static void read_header(mavlink_header_t *h) {
+    h->plen    = (uint8_t) (av_read(RX_BASE, 0x101 * 4) & 0xFF);
+    h->incompat= (uint8_t) (av_read(RX_BASE, 0x102 * 4) & 0xFF);
+    h->compat  = (uint8_t) (av_read(RX_BASE, 0x103 * 4) & 0xFF);
+    h->sys_id  = (uint8_t) (av_read(RX_BASE, 0x104 * 4) & 0xFF);
+    h->comp_id = (uint8_t) (av_read(RX_BASE, 0x105 * 4) & 0xFF);
+    h->msg_id  =            av_read(RX_BASE, 0x106 * 4) & 0xFFFFFF;
+    h->seq     = (uint8_t) (av_read(RX_BASE, 0x107 * 4) & 0xFF);
+}
+
+// ── Clear dataValid ───────────────────────────────────────
+static void clear_data_valid(void) {
+    av_read(RX_BASE, 0x108 * 4);
+}
+
+// ── In ten message ────────────────────────────────────────
+static const char* msg_name(uint32_t msg_id) {
+    switch (msg_id) {
+        case 0:   return "HEARTBEAT";
+        case 1:   return "SYS_STATUS";
+        case 253: return "STATUSTEXT";
+        default:  return "UNKNOWN";
+    }
+}
+
+// ── In va verify frame ────────────────────────────────────
+static void print_frame(int num, mavlink_header_t *h, uint8_t *payload) {
+    int i;
+
+    printf("\n======================================================\n");
+    printf("  Frame #%d\n", num);
+    printf("======================================================\n");
+
+    // In raw bytes
+    printf("Raw: FD ");
+    printf("%02X %02X %02X %02X %02X %02X ",
+           h->plen, h->incompat, h->compat,
+           h->seq, h->sys_id, h->comp_id);
+    printf("%02X %02X %02X ",
+           (int)( h->msg_id        & 0xFF),
+           (int)((h->msg_id >>  8) & 0xFF),
+           (int)((h->msg_id >> 16) & 0xFF));
+    for (i = 0; i < h->plen; i++)
+        printf("%02X ", payload[i]);
+    printf("\n");
+
+    printf("------------------------------------------------------\n");
+    printf("  [00]      STX      : 0xFD\n");
+    printf("  [01]      LEN      : 0x%02X  (%d)\n",   h->plen,    h->plen);
+    printf("  [02]      INCOMPAT : 0x%02X\n",          h->incompat);
+    printf("  [03]      COMPAT   : 0x%02X\n",          h->compat);
+    printf("  [04]      SEQ      : 0x%02X  (%d)\n",   h->seq,     h->seq);
+    printf("  [05]      SYS_ID   : 0x%02X  (%d)\n",   h->sys_id,  h->sys_id);
+    printf("  [06]      COMP_ID  : 0x%02X  (%d)\n",   h->comp_id, h->comp_id);
+    printf("  [07-09]   MSG_ID   : %02X %02X %02X  (0x%06X) = %s\n",
+           (int)( h->msg_id        & 0xFF),
+           (int)((h->msg_id >>  8) & 0xFF),
+           (int)((h->msg_id >> 16) & 0xFF),
+           (int) h->msg_id,
+           msg_name(h->msg_id));
+
+    printf("  [10-%02d]   PAYLOAD  : ", 9 + h->plen);
+    for (i = 0; i < h->plen; i++)
+        printf("%02X ", payload[i]);
+    printf("\n");
+
+    printf("------------------------------------------------------\n");
+}
+
+// ── Verify HEARTBEAT ──────────────────────────────────────
+static void verify_heartbeat(uint8_t *payload) {
+    int pass = 1;
+    printf("  VERIFY HEARTBEAT:\n");
+
+    // HEARTBEAT layout (MAVLink v2):
+    // [0..3] custom_mode (uint32)
+    // [4]    type
+    // [5]    autopilot
+    // [6]    base_mode
+    // [7]    system_status
+    // [8]    mavlink_version
+
+    if (payload[4] == 0x06)
+        printf("  [OK]   type           = %d\n",   payload[4]);
+    else {
+        printf("  [FAIL] type           = %d (expect 6)\n", payload[4]);
+        pass = 0;
+    }
+
+    if (payload[5] == 0x08)
+        printf("  [OK]   autopilot      = %d\n",   payload[5]);
+    else {
+        printf("  [FAIL] autopilot      = %d (expect 8)\n", payload[5]);
+        pass = 0;
+    }
+
+    if (payload[6] == 0x00)
+        printf("  [OK]   base_mode      = %d\n",   payload[6]);
+    else {
+        printf("  [FAIL] base_mode      = %d (expect 0)\n", payload[6]);
+        pass = 0;
+    }
+
+    if (payload[7] == 0x04)
+        printf("  [OK]   system_status  = %d\n",   payload[7]);
+    else {
+        printf("  [FAIL] system_status  = %d (expect 4)\n", payload[7]);
+        pass = 0;
+    }
+
+    if (payload[8] == 0x03)
+        printf("  [OK]   mav_version    = %d\n",   payload[8]);
+    else {
+        printf("  [FAIL] mav_version    = %d (expect 3)\n", payload[8]);
+        pass = 0;
+    }
+
+    printf("\n");
+    if (pass) printf("  *** HEARTBEAT OK ***\n");
+    else      printf("  *** HEARTBEAT FAIL ***\n");
+    printf("------------------------------------------------------\n");
+}
+
+// ── Xu ly 1 frame ─────────────────────────────────────────
+static void process_frame(int num) {
+    mavlink_header_t h;
+    uint8_t payload[256];
+    int i;
+
+    // Doc header
+    read_header(&h);
+
+    // Doc payload tung byte tu FIFO
+    for (i = 0; i < h.plen; i++) {
+        payload[i] = fifo_read_byte();
+    }
+
+    // In frame
+    print_frame(num, &h, payload);
+
+    // Verify theo msg_id
+    switch (h.msg_id) {
+        case 0:
+            verify_heartbeat(payload);
+            break;
+        default:
+            printf("  No verify for MSG_ID=0x%06X\n", (int)h.msg_id);
+            break;
+    }
+
+    // Clear dataValid
+    clear_data_valid();
+}
+
+// ── Main ──────────────────────────────────────────────────
+int main(void) {
+    printf("\n======================================================\n");
+    printf("  MAVLink v2 RX Monitor\n");
+    printf("======================================================\n");
+    printf("Waiting for frames...\n");
+
+    int frame_count = 0;
+
+    while (1) {
+        if (av_read(RX_BASE, 0x108 * 4) & 0x1) {
+        	printf("======================================================\n");
+        }
+    }
+
+    return 0;
+}

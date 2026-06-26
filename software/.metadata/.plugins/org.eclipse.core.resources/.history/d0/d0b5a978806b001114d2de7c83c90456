@@ -1,0 +1,6 @@
+#include <stdio.h>
+#include "rx.h"
+
+void(int v){
+	while(v--);
+}
