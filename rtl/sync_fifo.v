@@ -8,7 +8,11 @@ module sync_fifo #(
     output reg [DATA_WIDTH-1:0] dout,
     output wire isFull,
     output wire isEmpty,
-    output reg dataValid
+    output reg dataValid,
+	 output reg  [31:0] wr_count,
+	 output reg  [31:0] rd_count,
+	 output reg  [31:0] overflow_count // so lan yc ghi nhung fifo day
+	 
 );
 
 reg [$clog2(DEPTH)-1:0] r_ptr;// con tro doc
@@ -23,7 +27,10 @@ always@(posedge clk, posedge reset) begin
         if(!isFull && wr_en) begin
             fifo[w_ptr] <= din;
             w_ptr <= w_ptr + 1;
-        end
+				wr_count <= wr_count + 1;
+        end else if(isFull && wr_en) begin
+				overflow_count <= overflow_count + 1;
+			end
     end
 end
 
@@ -39,6 +46,7 @@ always@(posedge clk, posedge reset) begin
             dout <= fifo[r_ptr];
             r_ptr <= r_ptr + 1;
             dataValid <= 1;
+				rd_count <= rd_count + 1;
         end
     end
 end

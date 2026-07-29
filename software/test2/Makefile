@@ -144,6 +144,7 @@ ELF := test2.elf
 # Paths to C, C++, and assembly source files.
 C_SRCS += hello_world.c
 C_SRCS += rx.c
+C_SRCS += tx.c
 CXX_SRCS :=
 ASM_SRCS :=
 

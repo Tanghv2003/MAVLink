@@ -1,0 +1,43 @@
+#pragma once
+#include <stdio.h>
+#define REG_FIFO         0x000
+#define REG_PAYLOAD_LEN  0x101
+#define REG_SYS_ID       0x104
+#define REG_MSG_ID       0x106
+#define REG_BUSY   0x108
+#define REG_CLEAR_VALID  0x109
+#define REG_FIFO_EMPTY   0x10A
+#define REG_FIFO_FULL   0x10B
+#define REG_DB_STATE   0x10C
+#define REG_DB_UART_STATE   0x10D
+
+
+typedef struct{
+	int stx;
+	int len;
+	int inc_flag;
+	int cmp_flag;
+	int seq;
+	int sys_ID;
+	int comp_ID;
+	int msg_ID;
+	char payload[255];
+
+}Frame ;
+
+
+int rx_read(int addr);
+void rx_write(int addr, int value);
+
+
+int data_Valid();
+int fifo_Empty();
+int fifo_Full();
+int dbg_state();
+int dbg_uart_state();
+
+
+void clear();
+void readFrame(Frame* frame);
+void printFrame(Frame* frame);
+void flushFifo();

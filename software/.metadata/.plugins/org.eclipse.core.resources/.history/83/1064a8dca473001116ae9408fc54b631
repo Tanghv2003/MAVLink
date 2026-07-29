@@ -1,0 +1,55 @@
+/*
+ * "Hello World" example.
+ *
+ * This example prints 'Hello from Nios II' to the STDOUT stream. It runs on
+ * the Nios II 'standard', 'full_featured', 'fast', and 'low_cost' example
+ * designs. It runs with or without the MicroC/OS-II RTOS and requires a STDOUT
+ * device in your system's hardware.
+ * The memory footprint of this hosted application is ~69 kbytes by default
+ * using the standard reference design.
+ *
+ * For a reduced footprint version of this template, and an explanation of how
+ * to reduce the memory footprint for a given application, see the
+ * "small_hello_world" template.
+ *
+ */
+
+#include <stdio.h>
+#include "system.h"
+#define UART_BASE URX_0_BASE
+#define EMPTY_REG 0x10A
+#define FULL_REG 0x10B
+#define BUSY_REG 0x10C
+#define FIFO_REG 0x000
+
+int rx_read(int addr){
+	return *(int*) (UART_BASE + addr * 4);
+}
+
+
+int rx_busy(){
+	return rx_read(REG_BUSY) & 0x01;
+}
+int fifo_Empty(){
+	return rx_read(EMPTY_REG) & 0x01;
+}
+
+int fifo_Full(){
+	return rx_read(FULL_REG) & 0x01;
+}
+
+void readFrame(){
+	if( !fifoEmpty() && !rx_busy()){
+		char buf;
+		//memset(buf,0,sizeof(buf));
+		buf = rx_read(FIFO_REG) & 0xFF;
+		printf("%2x ", buf);
+
+	}
+}
+int main()
+{
+  printf("Hello from Nios II!\n");
+
+  return 0;
+}

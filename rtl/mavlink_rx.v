@@ -33,7 +33,13 @@ module mavlink_rx #(
 
     //output reg dataValid,
     output reg rx_busy,
-    output [4:0] db_state
+    output wire [4:0] db_state,
+	 
+	 output reg	[31:0] bad_prefix_count,
+	 output reg [31:0] bad_header_count,
+	 output reg [31:0] bad_crc_count,
+	 output reg [31:0] frame_ok_count,
+	 output reg [31:0] frame_uart_count
     
 );
 
@@ -59,7 +65,7 @@ module mavlink_rx #(
         done         = 5'd14;
 
     reg [4:0] state;
-    wire reset_debug;
+    reg mavlink_rx_done;
         
     
     reg [7:0] seq_cnt;
@@ -99,6 +105,14 @@ module mavlink_rx #(
             crc_valid    <= 1'b0;
             crc_data     <= 8'd0;
             rx_busy <= 1'b0;
+				mavlink_rx_done <= 1'b0;
+				
+				bad_prefix_count <= 31'd0;
+				bad_header_count <= 31'd0;
+				bad_crc_count <= 31'd0;
+				frame_ok_count <= 31'd0;
+				//frame_uart_count <= 31'd0;
+				
             cnt <= 16'd0;
             for(i = 0;i <= 267; i = i + 1) begin
                 fifo_buf[i] <= 0;
@@ -113,22 +127,34 @@ module mavlink_rx #(
             case (state)
 
                 idle: begin
-                    if (rx_done_tick && uart_data == 8'hFD) begin
-                        crc_init <= 1'b1;
+							mavlink_rx_done <= 1'b0;
+                    if (rx_done_tick) begin
+								if(uart_data == 8'hFD) begin
+								crc_init <= 1'b1;
                         seq_cnt  <= 8'd0;
                         fifo_buf[0] <= 8'hFD;
                         state    <= len;
                         rx_busy <= 1;
+								end else begin
+								bad_prefix_count <= bad_prefix_count +1;
+								end
+                        
                     end
                 end
 
                 len: begin
                     if (rx_done_tick) begin
-                        payload_len <= uart_data;
+								if(uart_data <= MAX_PAYLOAD) begin
+								payload_len <= uart_data;
                         crc_data    <= uart_data;
                         crc_valid   <= 1'b1;
                         fifo_buf[1] <= uart_data;
                         state       <= inc_flag;
+								end else begin
+									bad_header_count <= bad_header_count + 1;
+									state <= idle;
+								end
+                        
                     end
                 end
 
@@ -265,9 +291,11 @@ module mavlink_rx #(
                             fifo_buf[11 + payload_len] <= crc_result[15:8];
                             
                             cnt       <= 16'd0;
+									 frame_ok_count <= frame_ok_count + 1;
                             state <= fifo;
                             end
                         else begin
+									 bad_crc_count <= bad_crc_count + 1;
                             state <= done;
                         end
                             
@@ -292,6 +320,7 @@ module mavlink_rx #(
                     fifo_buf[i] <= 0;
                     end
                     rx_busy <= 1'b0;
+						  mavlink_rx_done <= 1;
                     state <= idle;
                     
                 end
@@ -301,7 +330,16 @@ module mavlink_rx #(
         end
     end
     
-    reg [63:0] mavlink_rx_dbg;
+	 always@(posedge clk, posedge reset) begin
+			if(reset) begin
+				frame_uart_count <= 31'd0;
+			end else begin
+				if(rx_done_tick) begin
+					frame_uart_count <= frame_uart_count + 1;
+				end
+			end
+	 end
+    (* keep *) reg [63:0] mavlink_rx_dbg;
     always @* begin
         case (state)
             idle         : mavlink_rx_dbg = "idle    ";

@@ -58,8 +58,18 @@ void readFrame(Frame* frame ){
 		int crc0 = buf[8 + len];
 		int crc1 = buf[9 + len];
 
-
 		printFrame(frame);
+		printf(" BAD_PREFIX: %d ", (unsigned int) rx_read(REG_BAD_PREFIX));
+		printf(" BAD_HEADER: %d ", (unsigned int) rx_read(REG_BAD_HEADER));
+		printf(" BAD_CRC: %d ", (unsigned int) rx_read(REG_BAD_CRC));
+		printf(" FRAME_OK: %d ", (unsigned int) rx_read(REG_FRAME_OK));
+		printf(" FRAME_UART: %d ", (unsigned int) rx_read(REG_FRAME_UART));
+
+		printf(" FIFO_WRITE: %d ", (unsigned int) rx_read(REG_FIFO_WRITE_COUNT));
+		printf(" FIFO_READ: %d ", (unsigned int) rx_read(REG_FIFO_READ_COUNT));
+		printf(" OVERFLOW: %d\n", (unsigned int) rx_read(REG_FIFO_OVERFLOW_COUNT));
+
+
 		clear();
 	}else {
 		//printf("empty: %d, busy: %d, full: %d, state: %d, uart: %d\n", fifo_Empty(),rx_busy(), fifo_Full(), dbg_state(),dbg_uart_state() );

@@ -1,0 +1,47 @@
+/*
+ * tx.h
+ *
+ *  Created on: Jul 27, 2026
+ *      Author: tangh
+ */
+
+#ifndef TX_H_
+#define TX_H_
+
+#include <stdbool.h>
+
+
+#define ADDR_FIFO         0x000
+#define ADDR_PAYLOAD_LEN  (0x100 * 4)
+#define ADDR_INC_FLAGS    (0x101 * 4)
+#define ADDR_COM_FLAGS    (0x102 * 4)
+#define ADDR_SYSID        (0x103 * 4)
+#define ADDR_COMPID       (0x104 * 4)
+#define ADDR_MSGID        (0x105 * 4)
+#define ADDR_START        (0x106 * 4)
+#define ADDR_FIFO_FULL    (0x107 * 4)
+#define ADDR_FIFO_EMPTY   (0x108 * 4)
+#define ADDR_BUSY_REG     (0x109 * 4)
+
+
+
+void tx_write(int addr, int value);
+
+bool wait_done(void);
+bool is_full(void);
+
+void send_frame(char *payload,
+                int len,
+                int sys_id,
+                int comp_id,
+                int msg_id,
+                int inc_flags,
+                int cmp_flags);
+
+void send_heartbeat(void);
+void send_statusText(char *payload);
+void sendText(void);
+
+
+
+#endif /* TX_H_ */

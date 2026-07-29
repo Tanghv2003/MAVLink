@@ -4,7 +4,7 @@
  * Machine generated for CPU 'nios2_gen2_0' in SOPC Builder design 'proj'
  * SOPC Builder design path: ../../proj.sopcinfo
  *
- * Generated: Tue Jun 23 12:01:13 ICT 2026
+ * Generated: Mon Jul 27 09:45:51 ICT 2026
  */
 
 /*
@@ -139,6 +139,7 @@
 #define __LEDS
 #define __RX
 #define __TX
+#define __URX
 
 
 /*
@@ -275,5 +276,19 @@
 #define TX_0_NAME "/dev/tx_0"
 #define TX_0_SPAN 2048
 #define TX_0_TYPE "tx"
+
+
+/*
+ * urx_0 configuration
+ *
+ */
+
+#define ALT_MODULE_CLASS_urx_0 urx
+#define URX_0_BASE 0x90000
+#define URX_0_IRQ -1
+#define URX_0_IRQ_INTERRUPT_CONTROLLER_ID -1
+#define URX_0_NAME "/dev/urx_0"
+#define URX_0_SPAN 2048
+#define URX_0_TYPE "urx"
 
 #endif /* __SYSTEM_H_ */

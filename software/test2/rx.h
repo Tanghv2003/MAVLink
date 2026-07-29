@@ -1,4 +1,5 @@
 #pragma once
+#include "system.h"
 #include <stdio.h>
 #define REG_FIFO         0x000
 #define REG_PAYLOAD_LEN  0x101
@@ -10,6 +11,15 @@
 #define REG_FIFO_FULL   0x10B
 #define REG_DB_STATE   0x10C
 #define REG_DB_UART_STATE   0x10D
+
+#define REG_BAD_PREFIX 0x10E
+#define REG_BAD_HEADER 0x10F
+#define REG_BAD_CRC 0x110
+#define REG_FRAME_OK 0x111
+#define REG_FRAME_UART 0x112
+#define REG_FIFO_WRITE_COUNT 0x113
+#define REG_FIFO_READ_COUNT 0x114
+#define REG_FIFO_OVERFLOW_COUNT 0x115
 
 
 typedef struct{

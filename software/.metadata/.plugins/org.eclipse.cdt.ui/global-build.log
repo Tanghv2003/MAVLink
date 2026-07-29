@@ -1,36 +1,18 @@
-15:13:28 **** Incremental Build of configuration Nios II for project test2 ****
+22:35:34 **** Incremental Build of configuration Nios II for project os ****
 make all 
-Info: Building ../test2_bsp/
-C:/intelFPGA_lite/18.1/nios2eds/bin/gnu/H-x86_64-mingw32/bin/make --no-print-directory -C ../test2_bsp/
+Info: Building ../os_bsp/
+C:/intelFPGA_lite/18.1/nios2eds/bin/gnu/H-x86_64-mingw32/bin/make --no-print-directory -C ../os_bsp/
 [BSP build complete]
-Info: Compiling hello_world.c to obj/default/hello_world.o
-nios2-elf-gcc -xc -MP -MMD -c -I../test2_bsp//HAL/inc -I../test2_bsp/ -I../test2_bsp//drivers/inc  -pipe -D__hal__ -DALT_NO_INSTRUCTION_EMULATION -DALT_SINGLE_THREADED    -O0 -g -Wall   -mno-hw-div -mno-hw-mul -mno-hw-mulx -mgpopt=global  -o obj/default/hello_world.o hello_world.c
-Info: Compiling rx.c to obj/default/rx.o
-nios2-elf-gcc -xc -MP -MMD -c -I../test2_bsp//HAL/inc -I../test2_bsp/ -I../test2_bsp//drivers/inc  -pipe -D__hal__ -DALT_NO_INSTRUCTION_EMULATION -DALT_SINGLE_THREADED    -O0 -g -Wall   -mno-hw-div -mno-hw-mul -mno-hw-mulx -mgpopt=global  -o obj/default/rx.o rx.c
-rx.c: In function 'readFrame':
-rx.c:59:7: warning: unused variable 'crc1' [-Wunused-variable]
-   int crc1 = buf[9 + len];
-       ^
-rx.c:58:7: warning: unused variable 'crc0' [-Wunused-variable]
-   int crc0 = buf[8 + len];
-       ^
-Info: Linking test2.elf
-nios2-elf-g++  -T'../test2_bsp//linker.x' -msys-crt0='../test2_bsp//obj/HAL/src/crt0.o' -msys-lib=hal_bsp -L../test2_bsp/   -Wl,-Map=test2.map   -O0 -g -Wall   -mno-hw-div -mno-hw-mul -mno-hw-mulx -mgpopt=global  -o test2.elf obj/default/hello_world.o obj/default/rx.o -lm -msys-lib=m
-nios2-elf-insert test2.elf --thread_model hal --cpu_name nios2_gen2_0 --qsys true --simulation_enabled false --stderr_dev jtag_uart_0 --stdin_dev jtag_uart_0 --stdout_dev jtag_uart_0 --sopc_system_name proj --quartus_project_dir "C:/Users/tangh/TANGHV/code/MAVLink" --jdi ../..//output_files/top.jdi --sopcinfo C:/Users/tangh/TANGHV/code/MAVLink/software/test2_bsp/../../proj.sopcinfo
-Info: (test2.elf) 72 KBytes program size (code + initialized data).
-Info:             177 KBytes free for stack + heap.
-Info: Creating test2.objdump
-nios2-elf-objdump --disassemble --syms --all-header --source test2.elf >test2.objdump
-[test2 build complete]
-15:13:46 **** Build of configuration Nios II for project test2 ****
+[os build complete]
+22:35:41 **** Build of configuration Nios II for project os ****
 make all 
-Info: Building ../test2_bsp/
-C:/intelFPGA_lite/18.1/nios2eds/bin/gnu/H-x86_64-mingw32/bin/make --no-print-directory -C ../test2_bsp/
+Info: Building ../os_bsp/
+C:/intelFPGA_lite/18.1/nios2eds/bin/gnu/H-x86_64-mingw32/bin/make --no-print-directory -C ../os_bsp/
 [BSP build complete]
-[test2 build complete]
-15:13:47 **** Incremental Build of configuration Nios II for project test2 ****
+[os build complete]
+22:36:05 **** Incremental Build of configuration Nios II for project os ****
 make all 
-Info: Building ../test2_bsp/
-C:/intelFPGA_lite/18.1/nios2eds/bin/gnu/H-x86_64-mingw32/bin/make --no-print-directory -C ../test2_bsp/
+Info: Building ../os_bsp/
+C:/intelFPGA_lite/18.1/nios2eds/bin/gnu/H-x86_64-mingw32/bin/make --no-print-directory -C ../os_bsp/
 [BSP build complete]
-[test2 build complete]
+[os build complete]
