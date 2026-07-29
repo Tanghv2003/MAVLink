@@ -2,8 +2,8 @@
 <sch:Settings xmlns:sch="http://www.altera.com/embeddedsw/bsp/schema">
         <BspType>hal</BspType>
         <BspVersion>default</BspVersion>
-        <BspGeneratedTimeStamp>Jul 27, 2026 9:45:50 AM</BspGeneratedTimeStamp>
-        <BspGeneratedUnixTimeStamp>1785120350320</BspGeneratedUnixTimeStamp>
+        <BspGeneratedTimeStamp>Jul 29, 2026 11:20:39 PM</BspGeneratedTimeStamp>
+        <BspGeneratedUnixTimeStamp>1785342039612</BspGeneratedUnixTimeStamp>
         <BspGeneratedLocation>C:\Users\tangh\TANGHV\code\MAVLink\software\test2_bsp</BspGeneratedLocation>
         <BspSettingsFile>settings.bsp</BspSettingsFile>
         <SopcDesignFile>..\..\proj.sopcinfo</SopcDesignFile>
@@ -933,6 +933,12 @@
                 <addressRange>0x00090000 - 0x000907FF</addressRange>
                 <addressSpan>2048</addressSpan>
                 <attributes/>
+        </MemoryMap>
+        <MemoryMap>
+                <slaveDescriptor>timer_0</slaveDescriptor>
+                <addressRange>0x00100000 - 0x0010001F</addressRange>
+                <addressSpan>32</addressSpan>
+                <attributes>timer</attributes>
         </MemoryMap>
         <LinkerSection>
                 <sectionName>.text</sectionName>

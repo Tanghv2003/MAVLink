@@ -7,8 +7,8 @@ int main()
 	Frame f;
     while(1){
     	//sendText();
-    	//readFrame(&f);
+    	readFrame(&f);
     	//send_statusText("xong 1 frame\n");
-    	sendText();
+    	//sendText();
     }
 }
